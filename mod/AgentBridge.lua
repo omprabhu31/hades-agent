@@ -1,0 +1,484 @@
+-- AgentBridge: read-only bridge between Hades and the Python agent.
+--
+-- Game -> Python: one line per message on stdout, "AGB1 <json>". The game's
+-- Lua has no io library, but print() reaches the process's stdout when the
+-- game binary is launched directly.
+-- Python -> game: the Python side atomically writes runtime/cmd.lua, which
+-- returns a table { seq = N, cmd = "...", ... }; loadfile() works on absolute
+-- paths even without io. Only non-gameplay commands are accepted.
+--
+-- Hard rule (AGENTS.md 5): "obs" holds only what a human can see on screen.
+-- Anything hidden goes in "info" and may be used for reward/logging only.
+-- This file must never change game state other than the simulation speed.
+
+AgentBridge = AgentBridge or {}
+local AB = AgentBridge
+-- Save() serialises every global table with luabins (Main.lua:1020-1035),
+-- and a table holding functions makes the save fail: the game then reports
+-- "Corrupted Save Data" (seen live 2026-11-26). Keep the bridge out of saves.
+if SaveIgnores ~= nil then SaveIgnores["AgentBridge"] = true end
+AB.Version = 2
+AB.CmdPath = "/Users/om-prabhu/projects/hades-agent/runtime/cmd.lua"
+AB.Interval = 0.05      -- seconds of game time between observations
+AB.LastCmdSeq = -1
+AB.Frame = 0
+AB.Speed = 1.0
+AB.Gen = AB.Gen or 0
+
+-- Minimal JSON encoder: tables with only 1..n keys become arrays.
+local function encode(v, out)
+  local t = type(v)
+  if t == "nil" then out[#out + 1] = "null"
+  elseif t == "boolean" then out[#out + 1] = v and "true" or "false"
+  elseif t == "number" then
+    if v ~= v or v == math.huge or v == -math.huge then out[#out + 1] = "null"
+    elseif v == math.floor(v) and math.abs(v) < 1e15 then out[#out + 1] = string.format("%d", v)
+    else out[#out + 1] = string.format("%.4f", v) end
+  elseif t == "string" then
+    out[#out + 1] = '"' .. v:gsub('[%c"\\]', function(c)
+      if c == '"' then return '\\"' elseif c == "\\" then return "\\\\" end
+      return string.format("\\u%04x", c:byte())
+    end) .. '"'
+  elseif t == "table" then
+    local n = #v
+    local isArray = true
+    for k in pairs(v) do
+      if type(k) ~= "number" or k < 1 or k > n or k ~= math.floor(k) then isArray = false break end
+    end
+    if isArray then
+      out[#out + 1] = "["
+      for i = 1, n do
+        if i > 1 then out[#out + 1] = "," end
+        encode(v[i], out)
+      end
+      out[#out + 1] = "]"
+    else
+      out[#out + 1] = "{"
+      local first = true
+      for k, val in pairs(v) do
+        if type(val) ~= "function" and type(val) ~= "userdata" then
+          if not first then out[#out + 1] = "," end
+          first = false
+          encode(tostring(k), out)
+          out[#out + 1] = ":"
+          encode(val, out)
+        end
+      end
+      out[#out + 1] = "}"
+    end
+  else
+    out[#out + 1] = "null"
+  end
+end
+
+local function emitRaw(kind, payload)
+  local out = {}
+  encode({ k = kind, f = AB.Frame, d = payload }, out)
+  print("AGB1 " .. table.concat(out))
+end
+
+-- Never lets an error escape into the game; the fallback uses the same
+-- encoder so it is valid JSON too.
+function AB.Emit(kind, payload)
+  local ok, err = pcall(emitRaw, kind, payload)
+  if not ok then pcall(emitRaw, "error", { where = "emit", kind = kind, msg = tostring(err) }) end
+end
+
+local function loc(id)
+  local ok, l = pcall(GetLocation, { Id = id })
+  if ok and l ~= nil then return l.X, l.Y end
+  return nil, nil
+end
+
+local function round1(x) if x == nil then return nil end return math.floor(x * 10 + 0.5) / 10 end
+
+local function ceil(x) if x == nil then return nil end return math.ceil(x) end
+local function frac2(a, b)
+  if a == nil or b == nil or b <= 0 then return nil end
+  return math.floor(a / b * 100 + 0.5) / 100
+end
+local function angle(id)
+  local ok, a = pcall(GetAngle, { Id = id })
+  if ok and type(a) == "number" then return round1(a) end
+  return nil
+end
+
+-- Each section reads one part of the screen. Sections run under pcall, so a
+-- failure in one (an engine call with an unexpected shape) only drops that
+-- section and is reported in obs.errors.
+-- Citations: docs/game_state_reference.md (task 002).
+local Sections = {}
+
+-- Hero: everything here is printed or drawn on the HUD (section 1 of the ref).
+function Sections.hero(obs, info, run)
+  local hero = run.Hero
+  local hx, hy = loc(hero.ObjectId)
+  local h = { x = round1(hx), y = round1(hy), angle = angle(hero.ObjectId),
+              hp = ceil(hero.Health), maxHp = ceil(hero.MaxHealth),
+              dead = hero.IsDead == true, money = run.Money }
+  if hero.LastStands ~= nil then h.lastStands = TableLength(hero.LastStands) end
+  local okA, ammo = pcall(GetWeaponProperty, { Id = hero.ObjectId, WeaponName = "RangedWeapon", Property = "Ammo" })
+  local okM, maxAmmo = pcall(GetWeaponMaxAmmo, { Id = hero.ObjectId, WeaponName = "RangedWeapon" })
+  if okA then h.castAmmo = ammo end
+  if okM then h.castAmmoMax = maxAmmo end
+  -- The call gauge is drawn as pips; raw points are hidden.
+  if hero.SuperCost ~= nil and hero.SuperCost > 0 and hero.SuperMeter ~= nil and IsSuperValid ~= nil and IsSuperValid() then
+    h.callPips = math.floor(hero.SuperMeter / hero.SuperCost)
+    h.callPipPartial = frac2(hero.SuperMeter % hero.SuperCost, hero.SuperCost)
+    info.superMeter = hero.SuperMeter
+  end
+  h.onLava = hero.OnLava == true
+  if GetEquippedWeapon ~= nil then h.weapon = GetEquippedWeapon() end
+  local traits = {}
+  for _, t in ipairs(hero.Traits or {}) do
+    if not t.Hidden then  -- hidden traits never appear on the tray
+      traits[#traits + 1] = { name = t.Name, rarity = t.Rarity, slot = t.Slot, god = t.God }
+    end
+  end
+  h.traits = traits
+  obs.hud = ShowingCombatUI == true
+  if not obs.hud then
+    -- HUD auto-hidden: its numbers and the boon tray are not on screen.
+    for _, k in ipairs({ "hp", "maxHp", "money", "lastStands", "castAmmo", "castAmmoMax",
+                         "callPips", "callPipPartial", "traits" }) do h[k] = nil end
+  end
+  obs.hero = h
+  info.heroHealth = hero.Health
+end
+
+-- Room: name and biome are shown on doors/the boon list; combat state is
+-- visible as live enemies and dark doors (section 4).
+function Sections.room(obs, info, run)
+  local room = run.CurrentRoom
+  if room == nil then return end
+  local r = { name = room.Name, biome = room.RoomSetName, exitsUnlocked = room.ExitsUnlocked == true }
+  if GetRunDepth ~= nil then r.depth = GetRunDepth(run) end
+  if IsCombatEncounterActive ~= nil then r.combat = IsCombatEncounterActive(run) == true end
+  obs.room = r
+  -- Hidden: future spawns.
+  if room.Encounter ~= nil then info.remainingSpawns = room.Encounter.RemainingSpawns end
+end
+
+-- Enemies and traps (section 2). Health is exported the way the bar draws it.
+function Sections.units(obs, info, run)
+  local enemies, traps, breakables = {}, {}, {}
+  local allied = HeroData and HeroData.DefaultHero and HeroData.DefaultHero.HeroAlliedUnits or {}
+  local exact = {}
+  for id, e in pairs(ActiveEnemies or {}) do
+    if e ~= nil and not e.IsDead then
+      local ex, ey = loc(id)
+      if ex ~= nil then
+        local name = tostring(e.Name)
+        if e.ToggleTrap then
+          traps[#traps + 1] = { id = id, name = name, x = round1(ex), y = round1(ey),
+                                disabled = (e.AIDisabled or e.DisableAIWhenReady) == true }
+        elseif e.HideHealthBar or name:sub(1, 9) == "Breakable" then
+          breakables[#breakables + 1] = { id = id, x = round1(ex), y = round1(ey) }
+        elseif not e.Charmed and not allied[name] then
+          local u = { id = id, name = name, x = round1(ex), y = round1(ey), angle = angle(id),
+                      boss = (e.IsBoss or e.UseBossHealthBar) == true }
+          -- Walls and pits are visible on screen; HasLineOfSight is an engine
+          -- call no script uses, so its shape is unverified: keep the field
+          -- only if it returns a boolean.
+          if HasLineOfSight ~= nil then
+            local okL, los = pcall(HasLineOfSight, { Id = run.Hero.ObjectId, DestinationId = id })
+            if okL and type(los) == "boolean" then u.los = los end
+          end
+          if u.boss then
+            u.hpFrac = frac2(e.Health, e.MaxHealth)
+            u.phase = e.CurrentPhase
+          elseif e.HitShields ~= nil and e.HitShields > 0 then
+            u.hpFrac = 1
+            u.shields = e.HitShields
+          elseif e.HealthBuffer ~= nil and e.HealthBuffer > 0 then
+            u.armorFrac = frac2(e.HealthBuffer, e.MaxHealthBuffer)
+          else
+            u.hpFrac = frac2(e.Health, e.MaxHealth)
+          end
+          if e.IsElite then
+            u.elite = true
+            local attrs = {}
+            for _, a in ipairs(e.EliteAttributes or {}) do attrs[#attrs + 1] = a end
+            u.eliteAttrs = attrs
+          end
+          enemies[#enemies + 1] = u
+          exact[#exact + 1] = { id = id, hp = e.Health, armor = e.HealthBuffer }
+        end
+      end
+    end
+  end
+  obs.enemies, obs.traps, obs.breakables = enemies, traps, breakables
+  info.enemyHealth = exact  -- hidden exact values, reward only
+end
+
+-- Exit doors: position always; the reward only once the icon is lit (section 4).
+function Sections.doors(obs, info, run)
+  local doors = {}
+  for id, door in pairs(OfferedExitDoors or {}) do
+    local dx, dy = loc(id)
+    if dx ~= nil then
+      local d = { id = id, x = round1(dx), y = round1(dy), lit = door.ReadyToUse == true }
+      if d.lit and door.Room ~= nil then
+        local room = door.Room
+        if room.NextRoomSet ~= nil then d.reward = "BiomeExit"
+        elseif HasHeroTraitValue ~= nil and HasHeroTraitValue("HiddenRoomReward") then d.reward = "Hidden"
+        elseif room.ChosenRewardType == nil then d.reward = "Story"
+        else
+          d.reward = room.ChosenRewardType
+          d.god = room.ForceLootName
+          if room.ChosenRewardType == "Devotion" then d.gods = { room.LootAName, room.LootBName } end
+        end
+        -- The reroll prompt is drawn only when rerolls remain (UIScripts.lua:2039).
+        d.reroll = door.CanBeRerolled == true and (run.NumRerolls or 0) > 0
+      end
+      doors[#doors + 1] = d
+    end
+  end
+  obs.doors = doors
+end
+
+-- Pickups lying in the room: boon/hammer/pom orbs (LootObjects,
+-- RoomManager.lua:2873) and consumables such as coins and hearts (group
+-- "ConsumableItems", Interactables.lua:952). Both are drawn with a label or
+-- icon. "blocking" means the exit stays shut until it is collected, which the
+-- game shows with the locked-door text.
+function Sections.pickups(obs, info, run)
+  local items = {}
+  for id, loot in pairs(LootObjects or {}) do
+    local x, y = loc(id)
+    if x ~= nil then
+      items[#items + 1] = { id = id, kind = "loot", name = loot.Name, x = round1(x), y = round1(y),
+                            blocking = ActivatedObjects ~= nil and ActivatedObjects[id] ~= nil }
+    end
+  end
+  local okIds, ids = pcall(GetIds, { Name = "ConsumableItems" })
+  if okIds and type(ids) == "table" then
+    for _, id in ipairs(ids) do
+      local x, y = loc(id)
+      if x ~= nil then
+        items[#items + 1] = { id = id, kind = "consumable", x = round1(x), y = round1(y),
+                              blocking = ActivatedObjects ~= nil and ActivatedObjects[id] ~= nil }
+      end
+    end
+  end
+  obs.pickups = items
+end
+
+-- Open screens (section 5): Lua overlays in ActiveScreens, plus the boon menu
+-- buttons that are actually displayed.
+function Sections.screens(obs, info, run)
+  local open = {}
+  for flag, v in pairs(ActiveScreens or {}) do
+    if v then open[#open + 1] = tostring(flag) end
+  end
+  table.sort(open)
+  obs.screens = open
+  if ActiveScreens ~= nil and ActiveScreens.BoonMenu and ScreenAnchors ~= nil and ScreenAnchors.ChoiceScreen ~= nil then
+    local screen = ScreenAnchors.ChoiceScreen
+    local comps = screen.Components or {}
+    local options = {}
+    for i = 1, 6 do
+      local b = comps["PurchaseButton" .. i]
+      if b ~= nil then
+        local bx, by = loc(b.Id)
+        local trait = b.Data and (b.Data.Name or b.Data.ItemName) or b.UpgradeName
+        local opt = b.LootData and b.LootData.UpgradeOptions and b.LootData.UpgradeOptions[i]
+        local locked = opt ~= nil and opt.Blocked == true  -- drawn greyed out (UpgradeChoice.lua:290)
+        options[#options + 1] = { index = i, name = trait, god = b.UpgradeName, type = b.Type,
+                                  rarity = b.Data and b.Data.Rarity, locked = locked, x = round1(bx), y = round1(by) }
+      end
+    end
+    obs.boonMenu = { subject = screen.SubjectName, options = options }
+  end
+end
+
+-- The House between runs (DeathArea*, RoomPreRun). CurrentRun.CurrentRoom
+-- still names the room the hero died in, so report the loaded map instead,
+-- plus the exits a player walks through: the courtyard door
+-- (DeathAreaSwitchRoom, DeathLoopData.lua:3951) and the new-run door
+-- (UseEscapeDoor / type NewRunDoor, DeathLoopData.lua:6200, PlayerAIData.lua:184).
+local function isHouseMap(map)
+  return type(map) == "string" and (map == "RoomPreRun" or map:sub(1, 9) == "DeathArea")
+end
+
+function Sections.house(obs, info, run)
+  local okMap, map = pcall(GetMapName, {})
+  if not okMap or not isHouseMap(map) then return end
+  obs.room = { name = map, house = true, combat = false }
+  obs.doors, obs.enemies, obs.pickups = {}, {}, {}
+  local exits, seen = {}, {}
+  for id, o in pairs(MapState and MapState.ActiveObstacles or {}) do
+    local fn = o.OnUsedFunctionName
+    if fn == "DeathAreaSwitchRoom" or fn == "UseEscapeDoor" then
+      local x, y = loc(id)
+      if x ~= nil then
+        seen[id] = true
+        exits[#exits + 1] = { id = id, x = round1(x), y = round1(y),
+                              kind = fn == "UseEscapeDoor" and "run" or "room",
+                              to = o.OnUsedFunctionArgs and o.OnUsedFunctionArgs.Name }
+      end
+    end
+  end
+  -- House rooms declare their doors per object id in the room's ObstacleData
+  -- (DeathLoopData.lua), which is not always mirrored in ActiveObstacles.
+  local houseRoom = CurrentDeathAreaRoom
+  for id, data in pairs(houseRoom and houseRoom.ObstacleData or {}) do
+    local fn = type(data) == "table" and data.OnUsedFunctionName or nil
+    if (fn == "DeathAreaSwitchRoom" or fn == "UseEscapeDoor") and not seen[id] then
+      local x, y = loc(id)
+      if x ~= nil then
+        seen[id] = true
+        exits[#exits + 1] = { id = id, x = round1(x), y = round1(y),
+                              kind = fn == "UseEscapeDoor" and "run" or "room",
+                              to = data.OnUsedFunctionArgs and data.OnUsedFunctionArgs.Name }
+      end
+    end
+  end
+  local okIds, ids = pcall(GetIdsByType, { Name = "NewRunDoor" })
+  if okIds and type(ids) == "table" then
+    for _, id in ipairs(ids) do
+      local x, y = loc(id)
+      if x ~= nil and not seen[id] then
+        exits[#exits + 1] = { id = id, x = round1(x), y = round1(y), kind = "run" }
+      end
+    end
+  end
+  obs.house = { map = map, exits = exits }
+end
+
+local SectionOrder = { "hero", "room", "units", "doors", "pickups", "screens", "house" }
+
+-- Builds the observation. Everything in obs is on screen for a human;
+-- hidden values go in info (reward and logging only, AGENTS.md rule 5).
+function AB.Snapshot()
+  local obs = { screen = nil }
+  local info = {}
+  local okScreen, screen = pcall(GetTopScreenName, {})
+  if okScreen then obs.screen = screen end
+  -- Nothing of the world is drawn behind these screens.
+  if obs.screen == "LoadScreen" then
+    obs.inRun = false
+    obs.loading = true
+    return obs, info
+  end
+  local run = CurrentRun
+  if run == nil or run.Hero == nil or run.Hero.ObjectId == nil then
+    obs.inRun = false
+    return obs, info
+  end
+  obs.inRun = true
+  for _, name in ipairs(SectionOrder) do
+    local ok, err = pcall(Sections[name], obs, info, run)
+    if not ok then
+      obs.errors = obs.errors or {}
+      obs.errors[#obs.errors + 1] = name .. ": " .. tostring(err)
+    end
+  end
+  info.depth = run.RunDepthCache
+  return obs, info
+end
+
+-- Training speed. The game sets its own hit-pauses with AddSimSpeedChange and
+-- resets to 1.0 when they end (CombatPresentation.lua:2124-2136). We never
+-- touch its bookkeeping; we re-assert our speed only while no game speed
+-- change is active, i.e. on load and after each hit-pause ends.
+function AB.MaintainSpeed()
+  local busy = MapState ~= nil and MapState.SimSpeedChanges ~= nil and not IsEmpty(MapState.SimSpeedChanges)
+  -- Hit-pauses can be shorter than one poll, so with a training speed set,
+  -- re-assert every tick outside a pause rather than only on its end.
+  if not busy and (AB.SpeedDirty or AB.WasBusy or AB.Speed ~= 1.0) then
+    AdjustSimulationSpeed({ Fraction = AB.Speed, LerpTime = 0 })
+    AB.SpeedDirty = false
+  end
+  AB.WasBusy = busy
+end
+
+-- Commands accepted from Python. None of them changes gameplay.
+local Commands = {
+  ping = function(c)
+    -- probe reports whether the command file ran in an empty environment
+    AB.Emit("pong", { seq = c.seq, probe = c.probe })
+  end,
+  speed = function(c)
+    local v = tonumber(c.value) or 1.0
+    if v ~= v then v = 1.0 end
+    if v < 0.1 then v = 0.1 elseif v > 10 then v = 10 end
+    AB.Speed = v
+    AB.SpeedDirty = true
+    AB.MaintainSpeed()
+    AB.Emit("ack", { seq = c.seq, cmd = "speed", value = v })
+  end,
+  interval = function(c)
+    local v = tonumber(c.value) or 0.05
+    if v ~= v or v > 1 then v = 0.05 end
+    if v < 0.01 then v = 0.01 end
+    AB.Interval = v
+    AB.Emit("ack", { seq = c.seq, cmd = "interval", value = v })
+  end,
+}
+
+function AB.PollCommand()
+  -- The command file is data from our own Python side. Lua 5.2's loadfile
+  -- takes an environment: an empty one means the file can only build a
+  -- table, never call game functions. Text mode only (no bytecode).
+  local okLoad, chunk = pcall(loadfile, AB.CmdPath, "t", {})
+  if not okLoad or type(chunk) ~= "function" then return end
+  local okRun, c = pcall(chunk)
+  if not okRun or type(c) ~= "table" or type(c.seq) ~= "number" or c.seq ~= c.seq then return end
+  if c.seq <= AB.LastCmdSeq then return end
+  AB.LastCmdSeq = c.seq
+  local handler = Commands[c.cmd]
+  if handler == nil then
+    AB.Emit("ack", { seq = c.seq, error = "unknown command" })
+    return
+  end
+  local ok, err = pcall(handler, c)
+  if not ok then AB.Emit("ack", { seq = c.seq, error = tostring(err) }) end
+end
+
+-- Each map load starts a new loop; a generation number makes any loop left
+-- over from the previous map exit instead of emitting duplicates.
+function AB.Loop(gen)
+  while AB.Gen == gen do
+    AB.Frame = AB.Frame + 1
+    -- Commands are rare; polling every 5th frame keeps file loads cheap.
+    if AB.Frame % 5 == 0 then pcall(AB.PollCommand) end
+    if AB.Speed ~= 1.0 or AB.SpeedDirty then pcall(AB.MaintainSpeed) end
+    local ok, obs, info = pcall(AB.Snapshot)
+    if ok then
+      AB.Emit("obs", { obs = obs, info = info, speed = AB.Speed })
+    else
+      AB.Emit("error", { where = "snapshot", msg = tostring(obs) })
+    end
+    wait(AB.Interval)
+  end
+end
+
+-- Wrap a game function to emit an event first; the original always runs
+-- with the same arguments and its results are returned unchanged.
+local function hook(name, kind, describe)
+  local base = _G[name]
+  if type(base) ~= "function" or AB["hooked_" .. name] then return end
+  AB["hooked_" .. name] = true
+  _G[name] = function(...)
+    local args = { ... }
+    pcall(function() AB.Emit("event", { type = kind, detail = describe and describe((table.unpack or unpack)(args)) or nil }) end)
+    return base(...)
+  end
+end
+
+hook("StartNewRun", "run_start")
+hook("StartRoom", "room_start", function(run, room) return { room = room and room.Name } end)
+hook("DoUnlockRoomExits", "room_cleared", function(run, room) return { room = room and room.Name } end)
+hook("KillEnemy", "enemy_killed", function(victim) return { name = victim and victim.Name, boss = victim and victim.IsBoss == true } end)
+hook("KillHero", "hero_died")
+hook("RecordRunCleared", "run_cleared")
+hook("LeaveRoom", "leave_room")
+
+OnAnyLoad{ function(triggerArgs)
+  AB.Gen = AB.Gen + 1
+  AB.SpeedDirty = AB.Speed ~= 1.0  -- re-apply after every map load
+  thread(AB.Loop, AB.Gen)
+end }
+
+AB.Emit("hello", { version = AB.Version })

@@ -1,0 +1,7 @@
+backups/
+*.sav
+__pycache__/
+.DS_Store
+runs/
+logs/
+runtime/

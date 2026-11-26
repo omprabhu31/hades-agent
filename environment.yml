@@ -1,0 +1,16 @@
+name: hades
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11.18
+  - numpy=2.4.6
+  - pytest=9.1.1
+  - pip
+  - pip:
+      - torch==2.15.0
+      - gymnasium==1.4.0
+      - pyobjc-framework-Quartz==13.1
+      - pyobjc-framework-ApplicationServices==13.1
+      - lupa==2.8
+      - pyflakes==3.4.0
