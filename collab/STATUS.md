@@ -57,7 +57,7 @@ Reading: samples are 6-10 rooms per group, so these differences are within noise
 
 ## How to resume (keep this current)
 1. Read `AGENTS.md`, this file, `docs/plan.md` (esp. "Status and next steps"), the last entries of `collab/LOG.md`, `runs/report.html`.
-2. `pgrep -x Game.macOS` must be empty. `pkill -x "Problem Reporter"` if a crash report is open. Install the mod (`mod/install.sh`), then launch in the background: `/opt/miniconda3/bin/conda run --no-capture-output -n hades python -m scripts.run_game --session <name> --obs-every 1`.
+2. The mod is uninstalled between sessions (game is stock); run `mod/install.sh` first. `pgrep -x Game.macOS` must be empty. `pkill -x "Problem Reporter"` if a crash report is open. Install the mod (`mod/install.sh`), then launch in the background: `/opt/miniconda3/bin/conda run --no-capture-output -n hades python -m scripts.run_game --session <name> --obs-every 1`.
 3. Ask the user (interactive question tool) before any input session unless they have granted a time window. Load the training save: `python -m scripts.menu_click 0.089 0.481` (Play) then `python -m scripts.menu_click 0.437 0.45` (slot 2, one click when it has a save). Screenshots: `python -m scripts.shot`.
 4. Play: `python -m scripts.run_agent --runs N --rooms 80 --max-minutes M --name <run-name>` (heuristic+unstick, records to `runs/`). Learned policies: `python -m scripts.train_bc LOGS...`, `python -m scripts.train_ppo <ckpt> --episodes N --speed 3`, `python -m scripts.eval_policy <ckpt> --episodes N` (speed 1.0). Report: `python -m scripts.make_report` then open `runs/report.html`; table: `python -m scripts.compare_runs`.
 5. Stop the game only with `python -m scripts.quit_game` (from play or House) or `--from-menu`.
