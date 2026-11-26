@@ -449,6 +449,148 @@ def test_read_only_mirror_has_no_purchase_controls(lua):
     ]
 
 
+HOUSE_GIFT_STUBS = """
+mapName = "DeathArea"
+function GetMapName() return mapName end
+function GetIdsByType(a)
+  if a.Name == "GiftRack" then return { 90 } end
+  return {}
+end
+function Contains(t, wanted)
+  for _, v in ipairs(t) do if v == wanted then return true end end
+  return false
+end
+function IsAlive(a) return a.Id ~= 92 end
+function IdExists(a) return a.Id == 98 end
+function GetGenusName(unit) return unit.GenusName or unit.Name end
+function GetUseData(unit) return unit.DrawnUseData end
+function CanReceiveGift() error("The bridge must not recompute gift eligibility") end
+function GetNextGiftResource() error("The bridge must not query hidden gift data") end
+GiftIconData = { GiftPoints = { GiftText = "GiftUseText" },
+                 SuperGiftPoints = { GiftText = "SuperGiftUseText" } }
+locs[90] = { X = 480, Y = 190 }
+locs[91] = { X = 34.07, Y = 180.23 }
+locs[92] = { X = 41, Y = 195 }
+locs[93] = { X = 60, Y = 211 }
+locs[94] = { X = 205, Y = 280 }
+locs[95] = { X = 323, Y = 280 }
+locs[96] = { X = 441, Y = 280 }
+locs[97] = { X = 960, Y = 1030 }
+ActiveEnemies[91] = {
+  Name = "NPC_Cerberus_01", Groups = { "NPCs", "EnemyTeam" }, CanReceiveGift = true,
+  GiftText = { GiftPoints = "CerberusGiftAndPetText", SuperGiftPoints = "CerberusSuperGiftAndPetText" },
+  DrawnUseData = { BaseUseText = "UseTalkToCerberus", GiftAvailable = "CerberusGiftAndPetText",
+                   GiftResourceAmount = 1 },
+}
+ActiveEnemies[92] = { Name = "DeadNPC", Groups = { "NPCs" } }
+ActiveEnemies[93] = { Name = "NonNPC", Groups = { "EnemyTeam" } }
+GameState = {
+  Gift = { NPC_Cerberus_01 = { Value = 5 }, HiddenNPC = { Value = 4 } },
+  Resources = { GiftPoints = 3, SuperGiftPoints = 50 },
+  LastAwardTrait = "MaxHealthKeepsakeTrait",
+}
+CurrentRun.Hero.Traits[2] = { Name = "MaxHealthKeepsakeTrait", Slot = "Keepsake", AnchorId = 98 }
+ScreenAnchors = {
+  UsePrompts = {},
+  ResourceShowing = { GiftPoints = true },
+  ResourceAnchorIds = { GiftPoints = 100 },
+  AwardMenuScreen = {
+    KeepOpen = true, LastTrait = "OldSelection", SelectedFrame = 99,
+    Components = {
+      UpgradeToggle1 = { Id = 94, Data = { Gift = "MaxHealthKeepsakeTrait", Unlocked = true } },
+      UpgradeToggle2 = { Id = 95, Data = { Gift = "HiddenKeepsake", Unlocked = false } },
+      UpgradeToggle3 = { Id = 96, Data = { Gift = "ReincarnationTrait", Unlocked = true }, Blocked = true },
+      UpgradeToggle1Legendary = { Id = 93, Data = { Gift = "HiddenCompanion", Unlocked = true } },
+      CloseButton = { Id = 97 },
+    }
+  },
+}
+"""
+
+
+@pytest.fixture
+def house_lua():
+    rt = lupa52.LuaRuntime(unpack_returned_tuples=True)
+    rt.execute(STUBS + HOUSE_GIFT_STUBS)
+    rt.execute(MOD.read_text())
+    return rt
+
+
+def test_house_gift_uses_drawn_prompt_and_visible_nectar_only(house_lua):
+    obs, _ = house_lua.eval("AgentBridge.Snapshot()")
+    npc = obs.house.characters[1]
+    assert len(obs.house.characters) == 1 and npc.name == "NPC_Cerberus_01"
+    assert (npc.id, npc.x, npc.y) == (91, 34.1, 180.2)
+    assert npc.giftPrompt is None and npc.usePrompt is False
+    assert obs.house.nectar == 3 and obs.house.keepsakeRack is None
+    assert obs.house.equippedKeepsake is None and obs.awardMenu is None
+
+    house_lua.execute("""
+      local npc = ActiveEnemies[91]
+      assert(GetUseData(npc) == npc.DrawnUseData)
+      ScreenAnchors.UsePrompts[91] = 101
+      GameState.Gift.NPC_Cerberus_01.Value = 8
+      npc.DrawnUseData.GiftAvailable = "CerberusSuperGiftAndPetText"
+      npc.DrawnUseData.GiftResourceAmount = 2
+      ScreenAnchors.ResourceShowing.GiftPoints = false
+    """)
+    obs, _ = house_lua.eval("AgentBridge.Snapshot()")
+    npc = obs.house.characters[1]
+    assert obs.house.nectar is None and npc.talkPrompt is True
+    assert npc.usePrompt is True and npc.promptTarget is True
+    assert dict(npc.giftPrompt) == {"resource": "GiftPoints", "amount": 1}
+
+    house_lua.execute("GetUseData(ActiveEnemies[91]); ScreenAnchors.UsePrompts[90] = 102")
+    obs, _ = house_lua.eval("AgentBridge.Snapshot()")
+    npc = obs.house.characters[1]
+    assert npc.usePrompt is True and npc.promptTarget is False
+    assert dict(npc.giftPrompt) == {"resource": "SuperGiftPoints", "amount": 2}
+
+    house_lua.execute('ActiveScreens.Dialog = {}')
+    obs, _ = house_lua.eval("AgentBridge.Snapshot()")
+    assert obs.house.characters is None and obs.awardMenu is None
+    house_lua.execute('ActiveScreens.Dialog = nil; ActiveEnemies[91] = nil')
+    obs, _ = house_lua.eval("AgentBridge.Snapshot()")
+    assert len(obs.house.characters) == 0
+
+
+def test_house_rack_names_and_selection_follow_drawn_icons(house_lua):
+    house_lua.execute('mapName = "RoomPreRun"; ScreenAnchors.UsePrompts[90] = 102')
+    obs, _ = house_lua.eval("AgentBridge.Snapshot()")
+    assert dict(obs.house.keepsakeRack) == {"id": 90, "x": 480, "y": 190, "usePrompt": True, "promptTarget": True}
+    assert obs.awardMenu is None and obs.house.equippedKeepsake is None
+
+    house_lua.execute("ShowingCombatUI = false; ActiveScreens.AwardMenu = {}")
+    run_one_tick(house_lua)
+    obs = [m for m in messages(house_lua) if m.kind == "obs"][-1].data["obs"]
+    assert "errors" not in obs
+    assert "nectar" not in obs["house"] and "keepsakeRack" not in obs["house"]
+    assert obs["awardMenu"] == {
+        "close": {"id": 97, "x": 960, "y": 1030},
+        "equipped": "MaxHealthKeepsakeTrait",
+        "keepsakes": [
+            {"id": 94, "index": 1, "name": "MaxHealthKeepsakeTrait", "x": 205, "y": 280,
+             "available": True, "locked": False, "equipped": True},
+            {"id": 95, "index": 2, "x": 323, "y": 280, "available": False, "locked": True, "equipped": False},
+            {"id": 96, "index": 3, "name": "ReincarnationTrait", "x": 441, "y": 280,
+             "available": False, "locked": True, "equipped": False},
+        ],
+    }
+    house_lua.execute("ScreenAnchors.AwardMenuScreen.SelectedFrame = nil")
+    obs, _ = house_lua.eval("AgentBridge.Snapshot()")
+    assert obs.awardMenu.equipped is None
+
+    house_lua.execute('ActiveScreens.MetaUpgrade = {}; ShowingCombatUI = true')
+    obs, _ = house_lua.eval("AgentBridge.Snapshot()")
+    assert obs.awardMenu is None
+    house_lua.execute('ActiveScreens = {}; ScreenAnchors.TraitBacking = 103')
+    obs, _ = house_lua.eval("AgentBridge.Snapshot()")
+    assert obs.awardMenu is None and obs.house.equippedKeepsake == "MaxHealthKeepsakeTrait"
+    house_lua.execute('topScreen = "PauseScreen"')
+    obs, _ = house_lua.eval("AgentBridge.Snapshot()")
+    assert obs.house.equippedKeepsake is None and obs.awardMenu is None
+
+
 def test_enemy_attacks_recorded_and_hero_ignored(lua):
     run_one_tick(lua)
     lua.execute("""

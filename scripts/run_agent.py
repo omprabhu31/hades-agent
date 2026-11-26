@@ -24,6 +24,7 @@ from agent.env import CombatConfig, HadesCombatEnv
 from agent.input import Action, Controller
 from agent.input.quartz import QuartzBackend, focus_game
 from agent.macro.driver import Macro
+from agent.macro.house import equip_keepsake, gift_nectar
 from agent.macro.mirror import spend_darkness
 from agent.policy import HeuristicConfig, HeuristicPolicy, UnstickConfig, UnstickPolicy
 from agent.runs import RunRecorder
@@ -135,6 +136,13 @@ def main(argv=None, *, policy=None, policy_name=None, episode_fn=None,
                 print("could not restore speed 1.0:", e, flush=True)
 
 
+def _house_log(rec, runs_started, **fields) -> None:
+    """Append one House action (gift, keepsake, Mirror) to the run record."""
+    with open(rec.dir / "house.jsonl", "a") as f:
+        f.write(json.dumps({"time": datetime.now(timezone.utc).isoformat(), "runs_started": runs_started,
+                            **fields}, default=list) + "\n")
+
+
 def _loop(a, bridge, rec, combat_cfg, episode_fn, on_episode_end) -> int:
     # A macOS "Hades quit unexpectedly" report window sits above the game and
     # swallows mouse clicks aimed at it (seen in run clips 2026-11-26).
@@ -144,6 +152,8 @@ def _loop(a, bridge, rec, combat_cfg, episode_fn, on_episode_end) -> int:
     rooms_left = 0
     runs_started = 0
     mirror_visit = None  # run count at the last Mirror visit: spend once per House stay
+    gift_visit = rack_visit = None  # same, for the Hall gift and the courtyard keepsake rack
+    known_keepsakes = None  # from the last rack survey; gifting waits for one (task 013)
     deadline = time.monotonic() + a.max_minutes * 60
     episode = 0
     with Controller(QuartzBackend(wid)) as c:
@@ -163,15 +173,29 @@ def _loop(a, bridge, rec, combat_cfg, episode_fn, on_episode_end) -> int:
                     break
                 else:
                     house = o.get("house") or {}
+                    if house.get("map") == "DeathArea" and gift_visit != runs_started:
+                        gift_visit = runs_started
+                        gift = gift_nectar(macro, bridge, known_keepsakes=known_keepsakes)
+                        print("gift", gift, flush=True)
+                        if "nectar_before" in gift:
+                            known_keepsakes = None  # re-survey before another gift
+                        _house_log(rec, runs_started, gift=gift)
+                        continue
+                    if house.get("map") == "RoomPreRun" and rack_visit != runs_started:
+                        rack_visit = runs_started
+                        rack = equip_keepsake(macro, bridge)
+                        print("keepsake", rack, flush=True)
+                        if "owned" in rack:
+                            known_keepsakes = set(rack["owned"])
+                        _house_log(rec, runs_started, keepsake=rack)
+                        continue
                     if house.get("map") == "DeathAreaBedroom" and mirror_visit != runs_started:
                         # Permanent upgrades before each run (docs/plan.md Stage A).
                         mirror_visit = runs_started
                         purchases = spend_darkness(macro, bridge)
                         print("mirror purchases", purchases, flush=True)
-                        with open(rec.dir / "house.jsonl", "a") as f:
-                            f.write(json.dumps({"time": datetime.now(timezone.utc).isoformat(),
-                                                "runs_started": runs_started, "mirror": purchases,
-                                                "darkness": (o.get("house") or {}).get("darkness")}) + "\n")
+                        _house_log(rec, runs_started, mirror=purchases,
+                                   darkness=(o.get("house") or {}).get("darkness"))
                         continue
                     # Route out of the House (DeathLoopData.lua): Great Hall ->
                     # Zagreus's bedroom -> courtyard (RoomPreRun) -> new-run door.

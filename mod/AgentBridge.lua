@@ -435,7 +435,137 @@ function Sections.mirror(obs, info, run)
   obs.mirror = menu
 end
 
-local SectionOrder = { "hero", "room", "units", "doors", "pickups", "screens", "house", "mirror" }
+-- GetUseData is called as the active use prompt is drawn (UIScripts.lua:2008-2022,
+-- 2120-2162, 2214-2238). Keep just the labels it put on screen, keyed by the
+-- live unit so a new room cannot inherit an old prompt for a reused object id.
+local houseUseLabels = setmetatable({}, { __mode = "k" })
+local getUseData = GetUseData
+if type(getUseData) == "function" then
+  GetUseData = function(unit, ...)
+    local data = getUseData(unit, ...)
+    -- Recording must never disturb the game's UI path, so it runs under pcall.
+    pcall(function()
+      if unit ~= nil and unit.CanReceiveGift and data ~= nil then
+        houseUseLabels[unit] = { talk = data.BaseUseText ~= nil and data.BaseUseText ~= "Blank",
+                                 gift = data.GiftAvailable, amount = data.GiftResourceAmount }
+      end
+    end)
+    return data
+  end
+end
+
+local function houseObject(id)
+  if id == nil then return nil end
+  local x, y = loc(id)
+  if x ~= nil and y ~= nil then return { id = id, x = round1(x), y = round1(y) } end
+end
+
+local function giftPrompt(unit)
+  local label = houseUseLabels[unit]
+  if label == nil or label.amount == nil or label.gift == nil then return nil end
+  -- Classify the rendered gift icon/text, including Cerberus's shared Gift/Pet
+  -- prompt (GiftData.lua:48-71, NPCData.lua:5367-5374). A custom label shared
+  -- across currencies does not reveal which resource it would spend.
+  local matched
+  for _, resource in ipairs({ "GiftPoints", "SuperGiftPoints" }) do
+    local custom = unit.GiftText
+    local customText = type(custom) == "table" and custom[resource] or custom
+    local icon = GiftIconData and GiftIconData[resource]
+    if label.gift == customText or (icon and label.gift == icon.GiftText) then
+      if matched then return nil end
+      matched = resource
+    end
+  end
+  if matched then return { resource = matched, amount = label.amount } end
+end
+
+function Sections.houseGifts(obs, info, run)
+  local house = obs.house
+  if house == nil or obs.screen == "PauseScreen" then return end
+  local anchors = ScreenAnchors or {}
+  if #obs.screens == 0 then
+    -- An NPC must be a live, activated member of the game's NPC use group
+    -- (RoomEvents.lua:162-197, RoomManager.lua:4041-4046, 4198-4199,
+    -- Interactables.lua:230).
+    local characters = {}
+    local prompts = anchors.UsePrompts or {}
+    local onlyPrompt = next(prompts)
+    if onlyPrompt ~= nil and next(prompts, onlyPrompt) ~= nil then onlyPrompt = nil end
+    for id, unit in pairs(ActiveEnemies or {}) do
+      if unit.Groups and Contains(unit.Groups, "NPCs") and IsAlive({ Id = id }) then
+        local row = houseObject(id)
+        if row then
+          row.name = GetGenusName(unit)
+          row.usePrompt = prompts[id] ~= nil
+          row.promptTarget = onlyPrompt == id
+          if row.usePrompt then
+            row.giftPrompt = giftPrompt(unit)
+            local label = houseUseLabels[unit]
+            row.talkPrompt = label ~= nil and label.talk
+          end
+          characters[#characters + 1] = row
+        end
+      end
+    end
+    table.sort(characters, function(a, b) return a.id < b.id end)
+    house.characters = characters
+
+    if house.map == "RoomPreRun" then
+      -- The courtyard runs UpdateGiftRackShineStatus, which locates this type
+      -- (DeathLoopData.lua:5839, 5850, 6014-6016, AwardMenuScripts.lua:1-19).
+      local okIds, ids = pcall(GetIdsByType, { Name = "GiftRack" })
+      if okIds and type(ids) == "table" then
+        house.keepsakeRack = houseObject(ids[1])
+        if house.keepsakeRack then
+          house.keepsakeRack.usePrompt = prompts[ids[1]] ~= nil
+          house.keepsakeRack.promptTarget = onlyPrompt == ids[1]
+        end
+      end
+    end
+  end
+
+  -- Resource count and equipped icon only while their HUD anchors are drawn
+  -- (UIScripts.lua:585-681, 1265-1339, 1558-1604).
+  if obs.hud and anchors.ResourceShowing and anchors.ResourceShowing.GiftPoints
+    and anchors.ResourceAnchorIds and anchors.ResourceAnchorIds.GiftPoints then
+    house.nectar = GameState.Resources.GiftPoints
+  end
+  if obs.hud and #obs.screens == 0 and anchors.TraitBacking then
+    for _, trait in pairs(run.Hero.Traits or {}) do
+      if trait.Slot == "Keepsake" and not trait.Hidden and trait.AnchorId and IdExists({ Id = trait.AnchorId }) then
+        house.equippedKeepsake = trait.Name
+        break
+      end
+    end
+  end
+
+  local screen = anchors.AwardMenuScreen
+  if #obs.screens ~= 1 or obs.screens[1] ~= "AwardMenu" or not (screen and screen.KeepOpen) then return end
+  local comps = screen.Components
+  local menu = { keepsakes = {}, close = comps.CloseButton and houseObject(comps.CloseButton.Id) }
+  local index = 1
+  -- Numbered UpgradeToggle buttons are keepsakes; companions have a
+  -- Legendary suffix. The unknown slots have no name (AwardMenuScripts.lua:
+  -- 250-281, 359-424, 560-574). The selected frame follows the new choice,
+  -- while LastTrait is the selection when the menu opened (236, 669-681, 742-766).
+  while comps["UpgradeToggle" .. index] do
+    local button = comps["UpgradeToggle" .. index]
+    local unlocked = button.Data.Unlocked == true
+    local selected = unlocked and screen.SelectedFrame ~= nil and button.Data.Gift == GameState.LastAwardTrait
+    local row = houseObject(button.Id) or {}
+    row.index = index
+    row.locked = not unlocked or button.Blocked == true
+    row.available = not row.locked
+    row.equipped = selected
+    if unlocked then row.name = button.Data.Gift end
+    if selected then menu.equipped = row.name end
+    menu.keepsakes[#menu.keepsakes + 1] = row
+    index = index + 1
+  end
+  obs.awardMenu = menu
+end
+
+local SectionOrder = { "hero", "room", "units", "doors", "pickups", "screens", "house", "mirror", "houseGifts" }
 
 -- Builds the observation. Everything in obs is on screen for a human;
 -- hidden values go in info (reward and logging only, AGENTS.md rule 5).
