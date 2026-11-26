@@ -18,7 +18,8 @@ local AB = AgentBridge
 -- "Corrupted Save Data" (seen live 2026-11-26). Keep the bridge out of saves.
 if SaveIgnores ~= nil then SaveIgnores["AgentBridge"] = true end
 AB.Version = 2
-AB.CmdPath = "/Users/om-prabhu/projects/hades-agent/runtime/cmd.lua"
+-- install.sh replaces the placeholder with this checkout's runtime/ folder.
+AB.CmdPath = "@@AGENT_RUNTIME@@/cmd.lua"
 AB.Interval = 0.05      -- seconds of game time between observations
 AB.LastCmdSeq = -1
 AB.Frame = 0

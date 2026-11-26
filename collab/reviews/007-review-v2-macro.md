@@ -8,9 +8,9 @@ Read-only. Game not launched, no input sent, game folder not modified. `conda ru
 
 ### C1. Chaos's hidden door reward is exported as the real reward
 
-[mod/AgentBridge.lua:206](/Users/om-prabhu/projects/hades-agent/mod/AgentBridge.lua:206)
+[mod/AgentBridge.lua:206](mod/AgentBridge.lua:206)
 
-The preview uses `HasHeroTraitValue("HiddenRoomReward")` ([RoomPresentation.lua:1604](/Users/om-prabhu/Library/Application Support/Steam/steamapps/common/Hades/Game.macOS.app/Contents/Resources/Content/Scripts/RoomPresentation.lua:1604)). That is true when a trait has the property, which is the curse `ChaosCurseHiddenRoomReward` (`HiddenRoomReward = true` in TraitData.lua:42496). The bridge calls `HeroHasTrait("HiddenRoomReward")`, which looks up a trait **named** `HiddenRoomReward` ([TraitScripts.lua:624](/Users/om-prabhu/Library/Application Support/Steam/steamapps/common/Hades/Game.macOS.app/Contents/Resources/Content/Scripts/TraitScripts.lua:624)). No trait has that name, so the check is false, `DebugAssert` runs on a missing `TraitData` key (TraitScripts.lua:628), and the section continues.
+The preview uses `HasHeroTraitValue("HiddenRoomReward")` ([RoomPresentation.lua:1604](game script RoomPresentation.lua:1604)). That is true when a trait has the property, which is the curse `ChaosCurseHiddenRoomReward` (`HiddenRoomReward = true` in TraitData.lua:42496). The bridge calls `HeroHasTrait("HiddenRoomReward")`, which looks up a trait **named** `HiddenRoomReward` ([TraitScripts.lua:624](game script TraitScripts.lua:624)). No trait has that name, so the check is false, `DebugAssert` runs on a missing `TraitData` key (TraitScripts.lua:628), and the section continues.
 
 Failure: with that curse active the door icon is `ChaosPreview` (a question mark) and the policy still receives `reward` = `ChosenRewardType` and `god` = `ForceLootName`. It can walk to the best reward the player is not allowed to see. A fresh save never has the curse, which is why the live door check did not catch this.
 
@@ -20,7 +20,7 @@ Fix: call `HasHeroTraitValue("HiddenRoomReward")`. Export `reward = "Hidden"` an
 
 ### M1. HUD numbers and hidden traits are exported while they are not drawn
 
-[mod/AgentBridge.lua:112](/Users/om-prabhu/projects/hades-agent/mod/AgentBridge.lua:112)
+[mod/AgentBridge.lua:112](mod/AgentBridge.lua:112)
 
 `obs.hud` records `ShowingCombatUI`, and the hero table is filled either way. The combat HUD hides itself after the player stands still (`ShowingCombatUI = nil` at UIScripts.lua:284, `HideAfterDelay` at UIScripts.lua:259). HP, max HP, obols, cast ammo, call pips and the weapon name are then not on screen. The reference says not to export HUD fields in that case.
 
@@ -32,19 +32,19 @@ Fix: export HP, money, ammo, call pips and weapon only while `ShowingCombatUI` i
 
 ### M2. Boon `name` is the god, repeated on every card
 
-[mod/AgentBridge.lua:266](/Users/om-prabhu/projects/hades-agent/mod/AgentBridge.lua:266), [agent/macro/rules.py:68](/Users/om-prabhu/projects/hades-agent/agent/macro/rules.py:68)
+[mod/AgentBridge.lua:266](mod/AgentBridge.lua:266), [agent/macro/rules.py:68](agent/macro/rules.py:68)
 
 `PurchaseButton.UpgradeName` is set to `lootData.Name` (UpgradeChoice.lua:86 and UpgradeChoice.lua:368), for example `ZeusUpgrade` or `WeaponUpgrade`. The trait id is `button.Data.Name`. The card's visible title comes from `upgradeTitle`, not from `UpgradeName`.
 
 `choose_boon_option` looks for `Weapon`, `Secondary` and `Rush` inside `name`. Every Zeus card is `ZeusUpgrade`, so the slot hint is 0 and the pick is rarity only. Every hammer card is `WeaponUpgrade`, so the hint is 3 on all of them and still does not separate hammers.
 
-Failure: the stated "attack, then special, then dash" order never sees an attack boon. The unit test stubs `UpgradeName = "ZeusWeaponTrait"` ([tests/test_bridge_mod.py:236](/Users/om-prabhu/projects/hades-agent/tests/test_bridge_mod.py:236)), so it locks the wrong field in.
+Failure: the stated "attack, then special, then dash" order never sees an attack boon. The unit test stubs `UpgradeName = "ZeusWeaponTrait"` ([tests/test_bridge_mod.py:236](tests/test_bridge_mod.py:236)), so it locks the wrong field in.
 
 Fix: export `name = b.Data and b.Data.Name`, `slot = b.Data and b.Data.Slot`, and for `Type == "TransformingTrait"` the blessing name on `b.Data.OnExpire.TraitData`. Keep exporting `rarity` from `b.Data.Rarity`. Do not export the rest of `Data` (processed numbers). Point the test at that shape.
 
 ### M3. Withheld boon cards are offered to the picker
 
-[mod/AgentBridge.lua:262](/Users/om-prabhu/projects/hades-agent/mod/AgentBridge.lua:262), [agent/macro/driver.py:74](/Users/om-prabhu/projects/hades-agent/agent/macro/driver.py:74)
+[mod/AgentBridge.lua:262](mod/AgentBridge.lua:262), [agent/macro/driver.py:74](agent/macro/driver.py:74)
 
 `blockedIndexes` still get a `PurchaseButton` (UpgradeChoice.lua:290). The game calls `UseableOff` and, 0.25s later, plays `BoonSlotLocked` (EventPresentation.lua:1169). At Heat 0, `CalcNumLootChoices` is 3 (TraitScripts.lua:1538), so this happens when more than three options were rolled. Each rank of Approval Process (`ReducedLootChoicesShrineUpgrade`) locks another card. The bridge exports every button that exists, including `Data.Rarity`. `choose_boon_option` can return the locked card. `click_ui` clicks it. The press does nothing and the menu stays open. `pick_boon` still returns that choice.
 
@@ -52,7 +52,7 @@ Fix: skip a button when `comps["PurchaseButton"..i.."Lock"]` exists. Until the l
 
 ### M4. Training speed falls to 1.0 after a hit-pause and the report stays at the training value
 
-[mod/AgentBridge.lua:310](/Users/om-prabhu/projects/hades-agent/mod/AgentBridge.lua:310), [mod/AgentBridge.lua:369](/Users/om-prabhu/projects/hades-agent/mod/AgentBridge.lua:369)
+[mod/AgentBridge.lua:310](mod/AgentBridge.lua:310), [mod/AgentBridge.lua:369](mod/AgentBridge.lua:369)
 
 `AddSimSpeedChange` / `RemoveSimSpeedChange` (CombatPresentation.lua:2124-2136) match the reference. The bridge writes only when the table is empty and (`SpeedDirty` or `WasBusy`). It does not write while `MapState.SimSpeedChanges` is non-empty, so it does not overwrite the pause fraction.
 
@@ -64,7 +64,7 @@ Fix: while `AB.Speed ~= 1` and the table is empty, re-apply on each poll, not on
 
 ### M5. Dialogue, fountains and a single interact stall or fake a room change
 
-[agent/macro/driver.py:82](/Users/om-prabhu/projects/hades-agent/agent/macro/driver.py:82), [agent/macro/driver.py:94](/Users/om-prabhu/projects/hades-agent/agent/macro/driver.py:94)
+[agent/macro/driver.py:82](agent/macro/driver.py:82), [agent/macro/driver.py:94](agent/macro/driver.py:94)
 
 `PlayTextLines` freezes the unit and disables `Use` and `Move` (UIScripts.lua:2558, Narrative.lua:36). Lines advance on `Confirm`, `Select` or `ContinueText` (Narrative.lua:700), not on the Use control `interact` taps. Choices are `ButtonDialogueChoice` obstacles (Narrative.lua:656) and are not in `obs.screens` or `boonMenu`. `walk_to` holds a direction against a frozen body until the timeout. One `interact` does not finish the conversation.
 
@@ -78,7 +78,7 @@ Fix: if `Dialog` is in `screens`, stop walking and drive the advance controls; e
 
 ### M6. The boon click lands before the menu is listening
 
-[agent/macro/driver.py:74](/Users/om-prabhu/projects/hades-agent/agent/macro/driver.py:74)
+[agent/macro/driver.py:74](agent/macro/driver.py:74)
 
 `OpenUpgradeChoiceMenu` sets `ActiveScreens.BoonMenu` immediately (UpgradeChoice.lua:9), builds buttons, then `wait(0.5)` before `HandleScreenInput` (UpgradeChoice.lua:73-79). That wait is there to ignore accidental input. `HandleScreenInput` selects with `NotifyOnInteract` (UIScripts.lua:2627). `pick_boon` calls `click_ui` on the first observation that has button coordinates, which exists during that wait. The click is dropped, the function returns the choice, and the menu is still open.
 
@@ -90,25 +90,25 @@ Fix: click only once `boonMenu` options have been stable and `screen.KeepOpen` w
 
 ### m1. `exitsUnlocked` flips before the doors light
 
-[mod/AgentBridge.lua:143](/Users/om-prabhu/projects/hades-agent/mod/AgentBridge.lua:143)
+[mod/AgentBridge.lua:143](mod/AgentBridge.lua:143)
 
 `CurrentRoom.ExitsUnlocked = true` at the start of `UnlockRoomExits` (RoomManager.lua:4801), then `wait(0.4)` and only later `CreateDoorRewardPreview` and `ReadyToUse` (RoomManager.lua:4930-4932). For that stretch `obs.room.exitsUnlocked` is true while every `door.lit` is still false. The reward is not included. Drop `exitsUnlocked` and use `door.lit`.
 
 ### m2. `room.combat` goes false while enemies are still on screen
 
-[mod/AgentBridge.lua:145](/Users/om-prabhu/projects/hades-agent/mod/AgentBridge.lua:145)
+[mod/AgentBridge.lua:145](mod/AgentBridge.lua:145)
 
 `IsCombatEncounterActive` returns false when any timer block is set, except `ThanatosEncounter` and `SurvivalEncounter` (RoomManager.lua:3705-3714, EncounterData.lua:12). Opening a menu or dialogue clears the flag. Enemies remain in `obs.enemies`. `AlwaysInCombat` is only on test rooms (RoomData.lua:488). Treat the flag as a hint, and treat live enemies and `door.lit` as the visible state. It does not reveal future spawns; `info.remainingSpawns` is the right place for that and is already outside `obs`.
 
 ### m3. Devotion gods are read off the wrong table
 
-[mod/AgentBridge.lua:211](/Users/om-prabhu/projects/hades-agent/mod/AgentBridge.lua:211)
+[mod/AgentBridge.lua:211](mod/AgentBridge.lua:211)
 
 The two icons are `room.Encounter.LootAName` and `room.Encounter.LootBName` (RoomPresentation.lua:1614, assigned at RunManager.lua:505-511). `room.LootAName` is never set, so `gods` is `[null, null]` on a door whose icons are visible. The reward string `"Devotion"` is still right.
 
 ### m4. Consumables are positions without a type
 
-[mod/AgentBridge.lua:241](/Users/om-prabhu/projects/hades-agent/mod/AgentBridge.lua:241)
+[mod/AgentBridge.lua:241](mod/AgentBridge.lua:241)
 
 `GetIds({ Name = "ConsumableItems" })` matches `AddToGroup` (Interactables.lua:952). The sprite is drawn. `HideWorldText` only suppresses the floating label (ConsumableData.lua:48, Interactables.lua:958). The observation has no name, so a heart, a coin and darkness are the same kind of point. Export the consumable `Name` (the icon id). Leave `HealFraction` and similar numbers out until the use prompt is up.
 
@@ -116,7 +116,7 @@ The two icons are `room.Encounter.LootAName` and `room.Encounter.LootBName` (Roo
 
 ### m5. `GetIds` is walked with `ipairs`
 
-[mod/AgentBridge.lua:238](/Users/om-prabhu/projects/hades-agent/mod/AgentBridge.lua:238)
+[mod/AgentBridge.lua:238](mod/AgentBridge.lua:238)
 
 Every script call site uses `pairs(GetIds(...))`. A non-sequence return yields an empty consumable list and no `obs.errors`. Use `pairs`.
 
@@ -128,19 +128,19 @@ Not leaks. The rally segment (`RallyHealth.Store`, UIScripts.lua:511), rail ammo
 
 ### n1. A short log drops its first line
 
-[agent/bridge/tail.py:27](/Users/om-prabhu/projects/hades-agent/agent/bridge/tail.py:27)
+[agent/bridge/tail.py:27](agent/bridge/tail.py:27)
 
 Seeking back 200KB and then `readline()` discards a complete first line when the file is shorter than that. The next poll only sees later lines. At 20 Hz this only bites a brand-new log. Sequence numbers are epoch milliseconds (`send_command` in game.py:96), so an old ack in the backfill will not match a new command.
 
 ### n2. The sidestep is replaced on the same iteration
 
-[agent/macro/driver.py:51](/Users/om-prabhu/projects/hades-agent/agent/macro/driver.py:51)
+[agent/macro/driver.py:51](agent/macro/driver.py:51)
 
 After 0.25s of the rotated heading, the loop applies the straight heading before the next position sample. Corners get a short nudge and then the same wall push. Apply the sidestep for the burst and skip the direct heading until the next sample.
 
 ### n3. `god` is copied for rewards that have no god icon
 
-[mod/AgentBridge.lua:210](/Users/om-prabhu/projects/hades-agent/mod/AgentBridge.lua:210)
+[mod/AgentBridge.lua:210](mod/AgentBridge.lua:210)
 
 `ForceLootName` is assigned for boons (RunManager.lua:473). Set `god` only when `reward == "Boon"`.
 

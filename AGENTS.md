@@ -4,7 +4,7 @@ Project-specific instructions for every agent in this repo. The global defaults 
 
 ## Project
 
-Hobby project: train an agent that plays the user's own Steam copy of Hades (macOS build, runs under Rosetta) and beats it, meaning it defeats Hades at the end of the Styx at Heat 0, without God Mode. No deadline.
+Hobby project, public on GitHub at `github.com/omprabhu31/hades-agent` (user instruction, 2026-11-26): train an agent that plays the user's own Steam copy of Hades (macOS build, runs under Rosetta) and beats it, meaning it defeats Hades at the end of the Styx at Heat 0, without God Mode. No deadline.
 
 ## Hard rules
 
@@ -16,7 +16,7 @@ Hobby project: train an agent that plays the user's own Steam copy of Hades (mac
 6. Game speed may be changed for training. Any evaluation that counts towards a milestone runs at normal speed (1.0).
 7. **Only one Hades instance at a time** (user instruction, 2026-11-26). Before launching, check `pgrep -x Game.macOS` and stop any running copy first. The game ignores SIGTERM and SIGINT; stop it with the in-game Quit or, at the main menu, `kill -9`. Code that launches the game must enforce this.
 8. Stop the game only through its menus (`scripts/quit_game.py`); a hard kill during play can corrupt the save. Any global table a mod adds must be listed in `SaveIgnores`.
-9. Never commit save files, game files or game assets. `backups/` is git-ignored.
+9. Never commit save files, game files, game assets, clips or run logs (`backups/`, `runs/`, `runtime/` are git-ignored). The repo is public: no absolute home paths, secrets or personal details in committed files; quote game scripts only as short cited excerpts.
 
 ## Environment
 
@@ -49,7 +49,7 @@ The lead asks the user through the host's interactive question tool, not in plai
 
 - Target: beat Hades at Heat 0; God Mode only as an early milestone, not the goal (user instruction, 2026-11-26).
 - Train in an empty save slot; the agent may earn every upgrade a normal player would and should be affected by everything a human player is (user instruction, 2026-11-26).
-- Hobby project, kept local and private (user instruction, 2026-11-26).
+- Hobby project; originally local only, then published as a public GitHub repo with a status README (user instruction, 2026-11-26).
 - Mod limited to on-screen information only, never hidden values (user instruction, 2026-11-26).
 - Game speed may be changed as the lead sees fit (user instruction, 2026-11-26).
 - Use the global multi-agent setup to collaborate (user instruction, 2026-11-26).

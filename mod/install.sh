@@ -17,7 +17,8 @@ if ! grep -q '^Import "AgentBridge' "$S/RoomManager.lua"; then
 fi
 [ -f "$B/RoomManager.lua" ] || { echo "no pristine RoomManager.lua backup" >&2; exit 1; }
 # Stage both files, then swap them in.
-cp "$ROOT/mod/$NAME" "$S/.$NAME.tmp"
+# Point the mod's command mailbox at this checkout's runtime/ folder.
+sed "s#@@AGENT_RUNTIME@@#$ROOT/runtime#" "$ROOT/mod/$NAME" > "$S/.$NAME.tmp"
 { cat "$B/RoomManager.lua"; printf '\n%s\n' "$LINE"; } > "$S/.RoomManager.lua.tmp"
 mv "$S/.$NAME.tmp" "$S/$NAME"
 mv "$S/.RoomManager.lua.tmp" "$S/RoomManager.lua"

@@ -30,7 +30,7 @@ May create: `docs/game_state_reference.md`, append to `collab/LOG.md`. Must not 
 
 ## Report
 
-Covered, in [docs/game_state_reference.md](/Users/om-prabhu/projects/hades-agent/docs/game_state_reference.md), all eight sections. Each item has a Lua snippet or a cited call site, a `File.lua:line` citation into the game scripts, and a VISIBLE or HIDDEN label. The game folder was not edited and the game was not launched.
+Covered, in [docs/game_state_reference.md](docs/game_state_reference.md), all eight sections. Each item has a Lua snippet or a cited call site, a `File.lua:line` citation into the game scripts, and a VISIBLE or HIDDEN label. The game folder was not edited and the game was not launched.
 
 1. Hero. `GetLocation` (`.X`, `.Y`), `GetAngle` (facing degrees), `GetVelocity` used as a scalar speed. HUD HP is `math.ceil` of `Health` and `MaxHealth` (`UIScripts.lua:499-518`); rally is the white segment. Death Defiance is `LastStands` drawn by `UpdateLifePips` (`UIScripts.lua:392`); heal amounts on a charge are HIDDEN. Cast ammo is `GetWeaponProperty` `"Ammo"` and `GetWeaponMaxAmmo` on `RangedWeapon`, plus the rail magazine on `GunWeapon`. The God Gauge is pips (`SuperMeterLimit` / `SuperCost`); the numeric textbox is commented out, so raw `SuperMeter` is HIDDEN. No dash meter is drawn. Status icons that are actually drawn are listed; `ActiveEffects` must not be exported wholesale. Obols are `CurrentRun.Money`. Weapon is `GetEquippedWeapon` over `HeroMeleeWeapons` (the six weapons at `WeaponSets.lua:39-47`). Aspect is `GetWeaponUpgradeTrait`; index 1 often has no trait name. Boons and the keepsake are `CurrentRun.Hero.Traits` as the tray draws them (`Slot`, icon, rarity, stack). Trait numbers are HIDDEN unless the tooltip is open.
 

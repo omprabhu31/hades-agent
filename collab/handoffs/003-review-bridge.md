@@ -26,6 +26,6 @@ Read-only review. You may create `collab/reviews/003-bridge-review.md` and appen
 - `/opt/miniconda3/bin/conda run -n hades python -m pytest -q tests` result reported.
 
 ## Report
-Codex completed the independent review in [003-bridge-review.md](/Users/om-prabhu/projects/hades-agent/collab/reviews/003-bridge-review.md). Verdict is request changes. The two critical findings are hidden observations during loading and a race in the single-instance guard. The remaining findings cover stdout failure, unsafe hard shutdown, install reversibility, command isolation and session handling, logging, focus and hooks.
+Codex completed the independent review in [003-bridge-review.md](collab/reviews/003-bridge-review.md). Verdict is request changes. The two critical findings are hidden observations during loading and a race in the single-instance guard. The remaining findings cover stdout failure, unsafe hard shutdown, install reversibility, command isolation and session handling, logging, focus and hooks.
 
 `/opt/miniconda3/bin/conda run -n hades python -m pytest -q tests` passed all 27 tests with repository caches disabled. Both shell scripts passed `bash -n`. Additional checks used a pre-existing capture, temporary files, a dummy child, Lua 5.2 stubs and Python mocks. Native Hades loader and signal behaviour, game function signatures, UI rendering and map timing, live Quartz behaviour and frame-time overhead remain unverified.

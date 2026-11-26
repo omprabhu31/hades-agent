@@ -60,7 +60,7 @@ def lua(tmp_path):
     rt = Rt(unpack_returned_tuples=True)
     rt.execute(STUBS)
     src = MOD.read_text().replace(
-        '"/Users/om-prabhu/projects/hades-agent/runtime/cmd.lua"', json.dumps(str(tmp_path / "cmd.lua")))
+        '"@@AGENT_RUNTIME@@/cmd.lua"', json.dumps(str(tmp_path / "cmd.lua")))
     rt.execute(src)
     rt.cmd_path = tmp_path / "cmd.lua"
     return rt
