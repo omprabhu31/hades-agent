@@ -13,6 +13,7 @@ Usage: python -m scripts.run_agent [--rooms N] [--speed S]
 Speed other than 1.0 is for training only (AGENTS.md rule 6).
 """
 import argparse
+import json
 import subprocess
 import time
 from dataclasses import asdict
@@ -23,6 +24,7 @@ from agent.env import CombatConfig, HadesCombatEnv
 from agent.input import Action, Controller
 from agent.input.quartz import QuartzBackend, focus_game
 from agent.macro.driver import Macro
+from agent.macro.mirror import spend_darkness
 from agent.policy import HeuristicConfig, HeuristicPolicy, UnstickConfig, UnstickPolicy
 from agent.runs import RunRecorder
 
@@ -141,6 +143,7 @@ def _loop(a, bridge, rec, combat_cfg, episode_fn, on_episode_end) -> int:
     time.sleep(0.3)
     rooms_left = 0
     runs_started = 0
+    mirror_visit = None  # run count at the last Mirror visit: spend once per House stay
     deadline = time.monotonic() + a.max_minutes * 60
     episode = 0
     with Controller(QuartzBackend(wid)) as c:
@@ -160,6 +163,16 @@ def _loop(a, bridge, rec, combat_cfg, episode_fn, on_episode_end) -> int:
                     break
                 else:
                     house = o.get("house") or {}
+                    if house.get("map") == "DeathAreaBedroom" and mirror_visit != runs_started:
+                        # Permanent upgrades before each run (docs/plan.md Stage A).
+                        mirror_visit = runs_started
+                        purchases = spend_darkness(macro, bridge)
+                        print("mirror purchases", purchases, flush=True)
+                        with open(rec.dir / "house.jsonl", "a") as f:
+                            f.write(json.dumps({"time": datetime.now(timezone.utc).isoformat(),
+                                                "runs_started": runs_started, "mirror": purchases,
+                                                "darkness": (o.get("house") or {}).get("darkness")}) + "\n")
+                        continue
                     # Route out of the House (DeathLoopData.lua): Great Hall ->
                     # Zagreus's bedroom -> courtyard (RoomPreRun) -> new-run door.
                     nxt = HOUSE_ROUTE.get(house.get("map"), "DeathArea")

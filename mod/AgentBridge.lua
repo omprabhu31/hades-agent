@@ -347,7 +347,92 @@ function Sections.house(obs, info, run)
   obs.house = { map = map, exits = exits }
 end
 
-local SectionOrder = { "hero", "room", "units", "doors", "pickups", "screens", "house" }
+function Sections.mirror(obs, info, run)
+  if obs.screen == "PauseScreen" then return end
+  local house = obs.house
+  local anchors = ScreenAnchors or {}
+  local resources = GameState and GameState.Resources or {}
+  if house ~= nil then
+    if house.map == "DeathAreaBedroom" then
+      -- The bedroom's usable map object is MetaUpgradeScreen
+      -- (PlayerAIData.lua:215-225, ObstacleData.lua:674-677, MetaUpgrades.lua:92-106).
+      local okIds, ids = pcall(GetIdsByType, { Name = "MetaUpgradeScreen" })
+      if okIds and type(ids) == "table" then
+        for _, id in ipairs(ids) do
+          local x, y = loc(id)
+          if x ~= nil and y ~= nil then
+            house.mirror = { id = id, x = round1(x), y = round1(y) }
+            break
+          end
+        end
+      end
+    end
+    -- Darkness is only readable while its resource text is shown
+    -- (UIScripts.lua:585-665, 668-681).
+    if obs.hud and anchors.ResourceShowing and anchors.ResourceShowing.MetaPoints
+      and anchors.ResourceAnchorIds and anchors.ResourceAnchorIds.MetaPoints then
+      house.darkness = resources.MetaPoints
+    end
+  end
+
+  -- The active flag is set before construction and cleared on close
+  -- (MetaUpgrades.lua:124-155, 185-186, 363-371, 1736-1754).
+  local screen = anchors.LevelUpScreen
+  if not (ActiveScreens and ActiveScreens.MetaUpgrade and screen and screen.KeepOpen) then return end
+  local comps = screen.Components
+  local menu = { upgrades = {} }
+  if comps.SubTitle then
+    -- MetaUpgrades.lua:216-221, 1133-1139.
+    menu.darkness = resources.MetaPoints or 0
+    if house then house.darkness = menu.darkness end
+  end
+  if comps.CloseButton then
+    -- MetaUpgrades.lua:267-272.
+    local x, y = loc(comps.CloseButton.Id)
+    if x ~= nil and y ~= nil then menu.close = { x = round1(x), y = round1(y) } end
+  end
+  -- Follow the displayed rows, including sealed rows with disabled plus
+  -- buttons. Covered panels have no UpgradeValueTotal component
+  -- (MetaUpgrades.lua:278-359, 762-872, 2088-2106).
+  local index = 1
+  while comps["Backing" .. index] do
+    local button = comps["RightArrowButton" .. index]
+    local rankButton = button and button.HandleType == "Add"
+    local name = rankButton and button.Data.Name
+    if screen.ReadOnly and comps["UpgradeValueTotal" .. index] then
+      -- The read-only viewer draws the row with no buy button (MetaUpgrades.lua:281-308, 866-930).
+      name = GameState.MetaUpgradesSelected[index]
+    end
+    if name then
+      local locked = comps["LockIcon" .. index] ~= nil
+      local nextCost
+      if rankButton and not locked then nextCost = button.Data.NextCost end
+      -- A final-rank animation can yield before the visible row updates
+      -- (MetaUpgrades.lua:1530-1535, 1593-1607; UIPresentation.lua:736-755).
+      if not rankButton or locked or nextCost == GetMetaUpgradePurchasePrice(button.Data) then
+        local rank = GetNumMetaUpgrades(name)
+        local row = { name = name, rank = rank, locked = locked, nextCost = nextCost,
+                      canBuy = rankButton == true and not locked and nextCost ~= nil and button.LastEnabled == true }
+        if rankButton then
+          local x, y = loc(button.Id)
+          row.x, row.y = round1(x), round1(y)
+          -- The cost label reveals the cap when it reads Maxed (MetaUpgrades.lua:1359-1386).
+          if not locked and nextCost == nil then row.maxRank = rank end
+        end
+        if comps["Backing" .. index .. "Swap"] then
+          -- The current side is visible via the swap control and row colour
+          -- (MetaUpgrades.lua:841-845, 877-912; MetaUpgradeData.lua:882-896).
+          row.selected = name
+        end
+        menu.upgrades[#menu.upgrades + 1] = row
+      end
+    end
+    index = index + 1
+  end
+  obs.mirror = menu
+end
+
+local SectionOrder = { "hero", "room", "units", "doors", "pickups", "screens", "house", "mirror" }
 
 -- Builds the observation. Everything in obs is on screen for a human;
 -- hidden values go in info (reward and logging only, AGENTS.md rule 5).

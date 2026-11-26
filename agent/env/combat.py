@@ -16,7 +16,7 @@ from agent.bridge.game import BridgeMessage
 from agent.input import Action
 
 from .actions import AIM_SECTORS, BUTTONS, MOVEMENTS, decode_action
-from .observations import OBSERVATION_SIZE, encode_observation
+from .observations import OBSERVATION_SIZE, HistoryEncoder
 
 
 class Bridge(Protocol):
@@ -175,6 +175,8 @@ class HadesCombatEnv(gym.Env):
         self._snapshot: _Snapshot | None = None
         self._steps = 0
         self._speed_set = False
+        # Per-episode visible history (previous actions, motion), task 009.
+        self._encoder = HistoryEncoder()
 
     def _latest_snapshot(self) -> _Snapshot | None:
         message = self.bridge.latest_obs
@@ -220,7 +222,8 @@ class HadesCombatEnv(gym.Env):
         if snapshot is None:
             raise TimeoutError(f"No active combat within {self.config.reset_timeout:g} wall seconds")
         self._snapshot = snapshot
-        return encode_observation(snapshot.visible), {"raw_obs": deepcopy(snapshot.visible)}
+        self._encoder.reset()
+        return self._encoder.encode(snapshot.visible), {"raw_obs": deepcopy(snapshot.visible)}
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
         before = self._snapshot
@@ -245,6 +248,7 @@ class HadesCombatEnv(gym.Env):
         outcome = None if after is None else _outcome(before, after)
         if after is not None and outcome is None:
             self.controller.apply(decode_action(action, self.window_size))
+            self._encoder.record_action(action)
 
             # Count from the end of apply, so pre-action frames do not shorten
             # the decision interval when the game runs faster than the agent.
@@ -276,7 +280,7 @@ class HadesCombatEnv(gym.Env):
         if terminated or truncated:
             self.close()
         info = {"raw_obs": deepcopy(after.visible), "outcome": outcome}
-        return encode_observation(after.visible), float(reward), terminated, truncated, info
+        return self._encoder.encode(after.visible), float(reward), terminated, truncated, info
 
     def close(self) -> None:
         self._snapshot = None

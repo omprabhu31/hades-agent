@@ -326,3 +326,122 @@ def test_hidden_room_reward_masks_door(lua):
     run_one_tick(lua)
     d = [m for m in messages(lua) if m.kind == "obs"][-1].data["obs"]["doors"][0]
     assert d["reward"] == "Hidden" and "god" not in d
+
+
+MIRROR_STUBS = """
+mapName = "DeathAreaBedroom"
+function GetMapName() return mapName end
+function GetIdsByType(a)
+  if a.Name == "MetaUpgradeScreen" then return { 80 } end
+  return {}
+end
+locs[80] = { X = 480, Y = 190 }
+locs[81] = { X = 954, Y = 996 }
+locs[82] = { X = 1155, Y = 372 }
+locs[83] = { X = 1155, Y = 417 }
+locs[84] = { X = 1155, Y = 462 }
+locs[85] = { X = 1155, Y = 507 }
+GameState = {
+  Resources = { MetaPoints = 62, LockKeys = 15 },
+  MetaUpgrades = { StaminaMetaUpgrade = 1, UnseenMetaUpgrade = 4 },
+  MetaUpgradesSelected = { "DoorHealMetaUpgrade", "HealthMetaUpgrade",
+                           "StaminaMetaUpgrade", "FirstStrikeMetaUpgrade", "UnseenMetaUpgrade" },
+}
+function GetNumMetaUpgrades(name) return GameState.MetaUpgrades[name] or 0 end
+function GetMetaUpgradePurchasePrice(data) return data.CostTable[GetNumMetaUpgrades(data.Name) + 1] end
+ScreenAnchors = {
+  ResourceShowing = { MetaPoints = true },
+  ResourceAnchorIds = { MetaPoints = 86 },
+  LevelUpScreen = {
+    KeepOpen = true,
+    Components = {
+      CloseButton = { Id = 81 }, SubTitle = { Id = 87 },
+      Backing1 = {}, Backing2 = {}, Backing3 = {}, Backing4 = {},
+      RightArrowButton1 = { Id = 82, HandleType = "Add", LastEnabled = true,
+                           Data = { Name = "DoorHealMetaUpgrade", NextCost = 10, CostTable = { 10, 20, 40 } } },
+      RightArrowButton2 = { Id = 83, HandleType = "Add", LastEnabled = true,
+                           Data = { Name = "HealthMetaUpgrade", NextCost = 40, CostTable = { 40, 45 } } },
+      LockIcon2 = {},
+      RightArrowButton3 = { Id = 84, HandleType = "Add", LastEnabled = false,
+                           Data = { Name = "StaminaMetaUpgrade", CostTable = { 50 } } },
+      RightArrowButton4 = { Id = 85, HandleType = "Add", LastEnabled = false,
+                           Data = { Name = "FirstStrikeMetaUpgrade", NextCost = 70, CostTable = { 70, 90 } } },
+      Backing4Swap = { Name = "FirstStrikeMetaUpgrade" },
+      LockBacking5 = {},
+    }
+  }
+}
+"""
+
+
+def test_mirror_is_located_in_bedroom_and_only_visible_darkness_is_exported(lua):
+    lua.execute(MIRROR_STUBS)
+    obs, _ = lua.eval("AgentBridge.Snapshot()")
+    assert obs.house.mirror.id == 80 and obs.house.mirror.x == 480 and obs.house.mirror.y == 190
+    assert obs.house.darkness == 62
+    assert obs.mirror is None  # Even if the screen anchor and saved ranks still exist.
+
+    lua.execute('ScreenAnchors.ResourceShowing.MetaPoints = false')
+    obs, _ = lua.eval("AgentBridge.Snapshot()")
+    assert obs.house.darkness is None and obs.mirror is None
+
+    lua.execute('mapName = "RoomPreRun"; ScreenAnchors.ResourceShowing.MetaPoints = true')
+    obs, _ = lua.eval("AgentBridge.Snapshot()")
+    assert obs.house.mirror is None and obs.house.darkness == 62
+
+
+def test_mirror_menu_projects_only_visible_rows_and_controls(lua):
+    lua.execute(MIRROR_STUBS)
+    lua.execute('ActiveScreens.MetaUpgrade = {}; ShowingCombatUI = false')
+    run_one_tick(lua)
+    obs = [m for m in messages(lua) if m.kind == "obs"][-1].data["obs"]
+    assert "errors" not in obs
+    assert obs["house"]["darkness"] == 62
+    assert obs["mirror"] == {
+        "darkness": 62,
+        "close": {"x": 954, "y": 996},
+        "upgrades": [
+            {"name": "DoorHealMetaUpgrade", "rank": 0, "nextCost": 10, "canBuy": True,
+             "locked": False, "x": 1155, "y": 372},
+            {"name": "HealthMetaUpgrade", "rank": 0, "canBuy": False, "locked": True, "x": 1155, "y": 417},
+            {"name": "StaminaMetaUpgrade", "rank": 1, "maxRank": 1, "canBuy": False,
+             "locked": False, "x": 1155, "y": 462},
+            {"name": "FirstStrikeMetaUpgrade", "rank": 0, "nextCost": 70, "canBuy": False,
+             "locked": False, "selected": "FirstStrikeMetaUpgrade", "x": 1155, "y": 507},
+        ],
+    }
+
+
+def test_mirror_waits_for_opening_and_purchase_redraw(lua):
+    lua.execute(MIRROR_STUBS)
+    lua.execute("ActiveScreens.MetaUpgrade = {}; ScreenAnchors.LevelUpScreen.KeepOpen = nil")
+    obs, _ = lua.eval("AgentBridge.Snapshot()")
+    assert obs.mirror is None
+
+    lua.execute("ScreenAnchors.LevelUpScreen.KeepOpen = true; GameState.MetaUpgrades.DoorHealMetaUpgrade = 1")
+    obs, _ = lua.eval("AgentBridge.Snapshot()")
+    assert all(row.name != "DoorHealMetaUpgrade" for row in obs.mirror.upgrades.values())
+
+    lua.execute("ScreenAnchors.LevelUpScreen.Components.RightArrowButton1.Data.NextCost = 20")
+    obs, _ = lua.eval("AgentBridge.Snapshot()")
+    assert obs.mirror.upgrades[1].rank == 1 and obs.mirror.upgrades[1].nextCost == 20
+
+    lua.execute('ActiveScreens.MetaUpgrade = nil; ShowingCombatUI = false')
+    obs, _ = lua.eval("AgentBridge.Snapshot()")
+    assert obs.mirror is None and obs.house.darkness is None
+
+
+def test_read_only_mirror_has_no_purchase_controls(lua):
+    lua.execute(MIRROR_STUBS)
+    lua.execute("""
+      ActiveScreens.MetaUpgrade = {}
+      ShowingCombatUI = false
+      local screen = ScreenAnchors.LevelUpScreen
+      screen.ReadOnly = true
+      screen.Components = { CloseButton = { Id = 81 }, Backing1 = {}, UpgradeValueTotal1 = {} }
+    """)
+    obs, _ = lua.eval("AgentBridge.Snapshot()")
+    assert obs.house.darkness is None and obs.mirror.darkness is None
+    assert [dict(row) for row in obs.mirror.upgrades.values()] == [
+        {"name": "DoorHealMetaUpgrade", "rank": 0, "canBuy": False, "locked": False},
+    ]

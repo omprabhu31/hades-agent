@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from agent.env.actions import ATTACK
-from agent.env.observations import OBSERVATION_SIZE, encode_observation
+from agent.env.observations import BASE_SIZE, OBSERVATION_SIZE, encode_observation
 from agent.learn.bc import BCConfig, train_bc
 from agent.learn.dataset import Demonstrations, build_dataset, split_dataset
 from agent.learn.network import ActorCritic, load_checkpoint, seed_training
@@ -65,7 +65,8 @@ def test_dataset_only_uses_visible_fields_and_resets_at_room_boundaries(tmp_path
     assert [episode["first_frame"] for episode in dataset.episodes] == [0, 5]
     assert dataset.actions[0, 1] == dataset.actions[2, 1] == ATTACK
     expected_obs = [encode_observation(rows[index]["d"]["obs"]) for index in (0, 3, 5, 7)]
-    np.testing.assert_array_equal(dataset.observations, expected_obs)
+    # The base frame matches the stateless encoder; history columns follow.
+    np.testing.assert_array_equal(dataset.observations[:, :BASE_SIZE], expected_obs)
 
 
 def test_dataset_from_captured_agent3_log():
@@ -87,7 +88,7 @@ def test_dataset_from_captured_agent3_log():
         if entry.get("k") == "obs" and entry.get("f") == first_frame:
             raw_obs = entry["d"]["obs"]
             break
-    np.testing.assert_array_equal(dataset.observations[0], encode_observation(raw_obs))
+    np.testing.assert_array_equal(dataset.observations[0, :BASE_SIZE], encode_observation(raw_obs))
     np.testing.assert_array_equal(dataset.actions[0], UnstickPolicy(HeuristicPolicy()).act(raw_obs))
 
 
@@ -108,4 +109,7 @@ def test_bc_cli_records_configuration_and_metrics(tmp_path, monkeypatch):
     records = [json.loads(line) for line in (run / "train.jsonl").read_text().splitlines()]
     assert [record["kind"] for record in records] == ["update", "validation", "update", "validation"]
     _, checkpoint = load_checkpoint(run / "checkpoints" / "bc.pt")
-    assert checkpoint["validation"] == records[-1]
+    # The saved weights are the best held-out epoch; the last epoch is kept for reference.
+    assert checkpoint["validation"]["final"] == records[-1]
+    best = min((r for r in records if r["kind"] == "validation"), key=lambda r: r["validation_loss"])
+    assert checkpoint["validation"]["best_epoch"] == best["epoch"]

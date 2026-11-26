@@ -10,7 +10,7 @@ from gymnasium.utils.env_checker import check_env
 from agent.bridge import BridgeMessage
 from agent.env import CombatConfig, HadesCombatEnv, RewardConfig, combat
 from agent.env.actions import decode_action
-from agent.env.observations import encode_observation
+from agent.env.observations import BASE_SIZE, encode_observation
 from agent.input import Action, Bounds, FakeBackend
 from agent.policy import HeuristicPolicy
 from scripts import run_baseline
@@ -191,7 +191,7 @@ def test_reset_waits_for_active_room_and_sets_requested_speed_once(harness):
     clock.after(0.02, lambda: bridge.publish(3, scene()))
     env = HadesCombatEnv(bridge, controller, config=CombatConfig(game_speed=3.0))
     vector, _ = env.reset(seed=3)
-    assert vector[-1] == 1
+    assert vector[BASE_SIZE - 1] == 1  # combat flag ends the base frame
     assert clock.now == pytest.approx(0.02)
     assert bridge.commands[0][0] == "speed"
     assert bridge.commands[0][1]["value"] == 3.0

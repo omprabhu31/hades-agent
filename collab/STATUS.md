@@ -48,9 +48,9 @@ Reading: samples are 6-10 rooms per group, so these differences are within noise
 | 006 | Macro layer + `scripts/run_agent.py` (combat, boons, dialogue, pickups, doors, House) + run recorder | Claude | DONE (live-verified) |
 | 007 | Review of bridge v2 + macro | Grok | DONE (fixes applied) |
 | 008 | Learning pipeline (BC + PPO + eval) | Codex | DONE (lead-reviewed; 2 PPO cycles run live) |
-| 009 | Observation history (previous actions, velocity, recent positions) + more BC data | open | NEXT |
+| 009 | Observation history (`HistoryEncoder`, 183 floats) + more BC data + best-epoch BC | Claude | DONE offline (results in docs/plan.md 3a); live eval pending |
 | 010 | Larger evaluations (>=30 combat rooms per policy) before claiming improvement | open | NEXT |
-| 011 | Mirror of Night: bridge support for the MetaUpgrade screen + macro to spend Darkness (survivability first) on each House visit | open | NEXT (Stage A) |
+| 011 | Mirror of Night: bridge `obs.house.mirror`/`obs.mirror` + `agent/macro/mirror.py` (`spend_darkness`), called once per bedroom visit in run_agent | Codex (impl), Claude (review, integration) | DONE offline; live check pending |
 | 012 | Stage B skills (NPC talk/gifting, Fated List, weapons, Contractor, fishing, Codex, ...) | open | LATER |
 | -- | Projectile perception (no API; consider OnWeaponFired tracking or vision) | open | LATER |
 

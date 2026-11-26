@@ -68,6 +68,9 @@ def train_bc(
     optimizer = torch.optim.Adam(policy.parameters(), lr=config.learning_rate)
     generator = torch.Generator().manual_seed(seed)
     update = 0
+    # Keep the weights with the lowest held-out loss: with ~14k samples the
+    # validation loss bottoms out well before the last epoch (seen 2026-11-26).
+    best_result, best_state = None, None
     for epoch in range(1, config.epochs + 1):
         policy.train()
         order = torch.randperm(len(train_obs), generator=generator).to(device)
@@ -87,4 +90,9 @@ def train_bc(
                   **score_bc(policy, val_obs, val_actions, config.batch_size)}
         if on_record is not None:
             on_record(result)
-    return result
+        if best_result is None or result["validation_loss"] < best_result["validation_loss"]:
+            best_result = result
+            best_state = {k: v.detach().clone() for k, v in policy.state_dict().items()}
+    if best_state is not None:
+        policy.load_state_dict(best_state)
+    return {**best_result, "best_epoch": best_result["epoch"], "final": result}

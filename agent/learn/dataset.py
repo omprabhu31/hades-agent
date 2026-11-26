@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from agent.env.observations import encode_observation
+from agent.env.observations import HistoryEncoder
 from agent.policy import HeuristicPolicy, UnstickPolicy
 
 
@@ -32,6 +32,8 @@ def build_dataset(
     observations, actions, episode_ids = [], [], []
     sources, episodes = [], []
     teacher = UnstickPolicy(HeuristicPolicy())
+    # Replays the env's history features with the teacher's own actions.
+    encoder = HistoryEncoder()
     for path in paths:
         path = Path(path).resolve()
         start_count = len(observations)
@@ -80,14 +82,17 @@ def build_dataset(
                     continue
                 if episode is None:
                     teacher.reset()
+                    encoder.reset()
                     last_decision = None
                     episode = {"source": len(sources), "room": new_key[0], "depth": new_key[1],
                                "first_frame": frame, "samples": 0}
                     episodes.append(episode)
                 if last_decision is not None and frame < last_decision + frames_per_step:
                     continue
-                observations.append(encode_observation(visible))
-                actions.append(teacher.act(visible))
+                observations.append(encoder.encode(visible))
+                action = teacher.act(visible)
+                encoder.record_action(action)
+                actions.append(action)
                 episode_ids.append(len(episodes) - 1)
                 episode["samples"] += 1
                 last_decision = frame
