@@ -53,6 +53,7 @@ The lead asks the user through the host's interactive question tool, not in plai
 - Mod limited to on-screen information only, never hidden values (user instruction, 2026-11-26).
 - Game speed may be changed as the lead sees fit (user instruction, 2026-11-26).
 - Use the global multi-agent setup to collaborate (user instruction, 2026-11-26).
+- Scope: first pass focuses on beating the game end to end (permanent buffs such as the Mirror of Night are in scope where they help); the long-term goal is for the agent to do everything a player can do in the game autonomously (talking to characters, side quests, unlocking weapons and permanent boosts, and the rest). See `docs/plan.md` "Scope and roadmap" (user instruction, 2026-11-26).
 - Only one Hades instance may run at a time (user instruction, 2026-11-26).
 - Record a video clip of each training iteration/episode as visible, measurable evidence of improvement (user instruction, 2026-11-26).
 - Save every training run separately with its results, parameters and everything associated with it (user instruction, 2026-11-26).

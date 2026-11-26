@@ -2,6 +2,20 @@
 
 Target: defeat Hades at the end of the Styx, Heat 0, no God Mode, in the training save (slot 2), playing through keyboard and mouse with only on-screen information. Milestones are judged at game speed 1.0.
 
+## Scope and roadmap (user instruction, 2026-11-26)
+
+Hades has much more than combat: talking to characters, gifting Nectar and Ambrosia, side quests (the Fated List of Minor Prophecies), unlocking weapons and their aspects, permanent boosts from the Mirror of Night and other sources (keepsakes, companions, House Contractor upgrades), fishing, the Codex, the Pact of Punishment, and the story after the first escape. The agent should eventually do all of it autonomously. The order:
+
+**Stage A: beat the game end to end (current focus).** Combat, boons, doors, the House route, and the permanent boosts that make escapes winnable:
+- **Mirror of Night** (Darkness, every run): buy survivability first. Death Defiance ranks, Thick Skin (max HP), Chthonic Vitality (heal on entering a chamber), Greater Reflex (extra dash), Infernal Soul (cast ammo); then damage (Shadow Presence, Boiling Blood). Exact costs and unlock order come from the game's `MetaUpgradeData.lua` when this is built.
+- **Keepsakes** that are cheap to earn and help directly, e.g. Cerberus's Old Spiked Collar (+max HP) from one Nectar gift. This needs the first NPC interaction (walking to a character and gifting).
+- **Weapon choice** once Chthonic Keys unlock other Infernal Arms; pick the one the policy does best with, by measurement.
+- Pact/Heat stays at 0 for the goal run.
+
+**Stage B: the rest of the game.** Character conversations and gifting until relationships max out; Fated List prophecies; all weapons and aspects (Titan Blood); remaining Mirror ranks and alternates; House Contractor purchases; fishing; Codex completion; companions; the epilogue (repeated escapes); Heat and Pact challenges. Each becomes a macro skill with a check in the bridge (visible information only) and its own recorded runs.
+
+Design implication: the macro layer will grow from a fixed script into a goal planner (what to do this visit to the House, this run, this room), with each activity as a separately tested skill. Combat stays a learned policy.
+
 ## Architecture
 
 ```

@@ -35,7 +35,11 @@ With 7 to 10 chambers per policy, these differences are within noise: chamber ty
 1. **Observation history.** The learned policy copies the hand-written one poorly: about 40% agreement on movement and 30% on aim in held-out chambers. That policy's choices depend on recent movement and button presses, which the current observation does not include. Next is adding previous actions, velocity and recent positions, and collecting more data.
 2. **Larger evaluations**, so changes can be measured with confidence.
 3. **Perception gaps.** There is no game data for projectile positions or attack warnings. Options are tracking attack events, or adding a small downscaled screen image to the observation.
-4. **Meta-progression.** Spending Darkness at the Mirror of Night between runs, then the first boss.
+4. **Permanent boosts.** Spend Darkness at the Mirror of Night between runs (Death Defiance and max-HP upgrades first), then the first boss.
+
+## Scope
+
+The first goal is to beat the game end to end. That includes the permanent boosts a player builds up between runs, such as Mirror of Night upgrades, because they make escapes far more winnable. Eventually the agent should do everything a player can do: talk to characters and give gifts, complete side quests (the Fated List), unlock every weapon and aspect, fish, fill the Codex, raise the Heat, and see the story through. `docs/plan.md` has the staged roadmap.
 
 ## How it works
 

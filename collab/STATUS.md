@@ -50,6 +50,8 @@ Reading: samples are 6-10 rooms per group, so these differences are within noise
 | 008 | Learning pipeline (BC + PPO + eval) | Codex | DONE (lead-reviewed; 2 PPO cycles run live) |
 | 009 | Observation history (previous actions, velocity, recent positions) + more BC data | open | NEXT |
 | 010 | Larger evaluations (>=30 combat rooms per policy) before claiming improvement | open | NEXT |
+| 011 | Mirror of Night: bridge support for the MetaUpgrade screen + macro to spend Darkness (survivability first) on each House visit | open | NEXT (Stage A) |
+| 012 | Stage B skills (NPC talk/gifting, Fated List, weapons, Contractor, fishing, Codex, ...) | open | LATER |
 | -- | Projectile perception (no API; consider OnWeaponFired tracking or vision) | open | LATER |
 
 ## Blockers
