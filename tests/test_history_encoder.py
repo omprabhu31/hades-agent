@@ -72,14 +72,13 @@ def test_hud_hidden_hp_not_used():
     assert enc.encode(hidden)[HIST + 5] == 0  # a hidden HUD cannot reveal a hit
 
 
-def test_attack_block_recency_and_shots():
+def test_attack_block_recency():
     obs = frame(0, 0, enemies=[{"id": 1, "x": 50, "y": 0, "firedAgo": 0.5}, {"id": 2, "x": 900, "y": 0}])
     obs["traps"] = [{"x": 10, "y": 0, "firedAgo": 0.0}]
-    obs["shots"] = [{"owner": 1, "name": "BoneShot", "x": 50, "y": 0, "angle": 180.0, "age": 1.0}]
+    obs["shots"] = [{"owner": 1, "x": 50, "y": 0, "angle": 180.0, "age": 1.0}]  # ignored: logging only
     v = encode_attacks(obs)
+    assert v.shape == (MAX_ENEMIES + MAX_TRAPS,)
     assert v[0] == np.float32(0.75) and v[1] == 0           # nearest enemy attacked 0.5 s ago
     assert v[MAX_ENEMIES] == 1.0                              # trap fired just now
-    shot = v[MAX_ENEMIES + MAX_TRAPS:MAX_ENEMIES + MAX_TRAPS + 6]
-    np.testing.assert_allclose(shot, [0.05, 0, -1, 0, 0.5, 1], atol=1e-6)  # flying left, half-way through memory
     full = HistoryEncoder().encode(obs)
     np.testing.assert_array_equal(full[BASE_SIZE:HISTORY_START], v)

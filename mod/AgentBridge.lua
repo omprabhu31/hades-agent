@@ -163,6 +163,7 @@ end
 -- Enemies and traps (section 2). Health is exported the way the bar draws it.
 function Sections.units(obs, info, run)
   local enemies, traps, breakables = {}, {}, {}
+  AB.VisibleAttackers = {}  -- ids listed below: the only units whose attacks count
   local allied = HeroData and HeroData.DefaultHero and HeroData.DefaultHero.HeroAlliedUnits or {}
   local exact = {}
   for id, e in pairs(ActiveEnemies or {}) do
@@ -174,6 +175,7 @@ function Sections.units(obs, info, run)
           traps[#traps + 1] = { id = id, name = name, x = round1(ex), y = round1(ey),
                                 disabled = (e.AIDisabled or e.DisableAIWhenReady) == true,
                                 firedAgo = AB.FiredAgo(id) }
+          AB.VisibleAttackers[id] = true
         elseif e.HideHealthBar or name:sub(1, 9) == "Breakable" then
           breakables[#breakables + 1] = { id = id, x = round1(ex), y = round1(ey) }
         elseif not e.Charmed and not allied[name] then
@@ -204,6 +206,7 @@ function Sections.units(obs, info, run)
             u.eliteAttrs = attrs
           end
           u.firedAgo = AB.FiredAgo(id)
+          AB.VisibleAttackers[id] = true
           enemies[#enemies + 1] = u
           exact[#exact + 1] = { id = id, hp = e.Health, armor = e.HealthBuffer }
         end
@@ -211,7 +214,9 @@ function Sections.units(obs, info, run)
     end
   end
   obs.enemies, obs.traps, obs.breakables = enemies, traps, breakables
-  obs.shots = AB.RecentShots()
+  -- Shot rows carry the shooter's pose, not a verified projectile path, and can
+  -- come from units with no drawn cue (review 016): logging only, never obs.
+  info.shots = AB.RecentShots()
   info.enemyHealth = exact  -- hidden exact values, reward only
 end
 
@@ -704,24 +709,27 @@ hook("LeaveRoom", "leave_room")
 -- each projectile's travel from its name.
 AB.Fired = AB.Fired or {}
 AB.Shots = AB.Shots or {}
-AB.AttackMemory = 40  -- frames (2 s of game time at the default interval)
+AB.VisibleAttackers = AB.VisibleAttackers or {}
+AB.AttackMemory = 2.0  -- seconds of game (world) time
+
+-- Ages use the scheduler's world clock (Main.lua:2, 611-614), so they do not
+-- depend on the polling interval (review 016).
+local function now() return _worldTime or 0 end
+local function ageOf(t) return math.floor((now() - t) * 100 + 0.5) / 100 end
 
 function AB.FiredAgo(id)
-  local f = AB.Fired[id]
-  if f == nil then return nil end
-  local age = AB.Frame - f
-  if age > AB.AttackMemory then return nil end
-  return math.floor(age * AB.Interval * 100 + 0.5) / 100  -- seconds of game time
+  local t = AB.Fired[id]
+  if t == nil or now() - t > AB.AttackMemory then return nil end
+  return ageOf(t)
 end
 
 function AB.RecentShots()
   local out, keep = {}, {}
   for _, shot in ipairs(AB.Shots) do
-    local age = AB.Frame - shot.frame
-    if age <= AB.AttackMemory then
+    if now() - shot.time <= AB.AttackMemory then
       keep[#keep + 1] = shot
       out[#out + 1] = { owner = shot.owner, name = shot.name, x = shot.x, y = shot.y, angle = shot.angle,
-                        age = math.floor(age * AB.Interval * 100 + 0.5) / 100 }
+                        age = ageOf(shot.time) }
     end
   end
   AB.Shots = keep
@@ -733,12 +741,15 @@ OnWeaponFired{ function(triggerArgs)
     local owner = triggerArgs.OwnerTable
     if owner == nil or owner.ObjectId == nil or CurrentRun == nil or CurrentRun.Hero == nil
       or owner.ObjectId == CurrentRun.Hero.ObjectId then return end
-    AB.Fired[owner.ObjectId] = AB.Frame
+    -- Only attackers the policy can see (listed as enemies or traps in the
+    -- latest snapshot) count as "just attacked"; lava tiles, allies and
+    -- auxiliary weapon owners are excluded (review 016, critical).
+    if AB.VisibleAttackers[owner.ObjectId] then AB.Fired[owner.ObjectId] = now() end
     if triggerArgs.ProjectileName ~= nil then
       local x, y = loc(owner.ObjectId)
       if x ~= nil then
         AB.Shots[#AB.Shots + 1] = { owner = owner.ObjectId, name = tostring(triggerArgs.ProjectileName),
-                                    x = round1(x), y = round1(y), angle = angle(owner.ObjectId), frame = AB.Frame }
+                                    x = round1(x), y = round1(y), angle = angle(owner.ObjectId), time = now() }
         if #AB.Shots > 32 then table.remove(AB.Shots, 1) end
       end
     end
@@ -747,7 +758,7 @@ end }
 
 OnAnyLoad{ function(triggerArgs)
   AB.Gen = AB.Gen + 1
-  AB.Fired, AB.Shots = {}, {}  -- ids are per map
+  AB.Fired, AB.Shots, AB.VisibleAttackers = {}, {}, {}  -- ids are per map
   AB.SpeedDirty = AB.Speed ~= 1.0  -- re-apply after every map load
   thread(AB.Loop, AB.Gen)
 end }

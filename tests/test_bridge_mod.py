@@ -591,28 +591,34 @@ def test_house_rack_names_and_selection_follow_drawn_icons(house_lua):
     assert obs.house.equippedKeepsake is None and obs.awardMenu is None
 
 
-def test_enemy_attacks_recorded_and_hero_ignored(lua):
-    run_one_tick(lua)
-    lua.execute("""
-      for _, h in ipairs(firedHooks) do
-        h({ OwnerTable = { ObjectId = 7 }, name = "SkellyAttack" })
-        h({ OwnerTable = { ObjectId = 7 }, name = "SkellyShot", ProjectileName = "BoneShot" })
-        h({ OwnerTable = { ObjectId = 1 }, name = "SwordWeapon", ProjectileName = "Slash" })
-      end
-    """)
-    lua.execute("AgentBridge.Frame = AgentBridge.Frame + 3")  # three ticks later
-    fired, nshots, name, age, owner = lua.eval("""(function() local o = AgentBridge.Snapshot()
-      return o.enemies[1].firedAgo, #o.shots, o.shots[1].name, o.shots[1].age, o.shots[1].owner end)()""")
-    assert fired == 0.15 and nshots == 1 and name == "BoneShot" and age == 0.15 and owner == 7
+def fire(lua, owner, projectile=None):
+    proj = 'nil' if projectile is None else '"%s"' % projectile
+    lua.execute("for _, h in ipairs(firedHooks) do h({ OwnerTable = { ObjectId = %d }, name = 'W', ProjectileName = %s }) end"
+                % (owner, proj))
+
+
+def test_only_visible_attackers_count_and_ages_use_world_time(lua):
+    lua.execute("_worldTime = 10; locs[99] = { X = 5, Y = 5 }")  # 99 has a position but is not listed
+    run_one_tick(lua)                      # enemy 7 is listed: a visible attacker
+    fire(lua, 7, "BoneShot")
+    fire(lua, 99, "LavaSplash")            # not listed (e.g. a lava tile): ignored
+    fire(lua, 1, "Slash")                  # the hero: ignored
+    lua.execute("_worldTime = 10.4; AgentBridge.Interval = 0.2")  # interval change must not matter
+    fired, nshots, shot_owner, shot_age, has_obs_shots = lua.eval("""(function()
+      local o, i = AgentBridge.Snapshot()
+      return o.enemies[1].firedAgo, #i.shots, i.shots[1].owner, i.shots[1].age, o.shots ~= nil end)()""")
+    assert fired == 0.4 and nshots == 2 and shot_owner == 7 and shot_age == 0.4
+    assert has_obs_shots is False          # shots are logging-only
+    assert lua.eval("AgentBridge.Fired[99]") is None
 
 
 def test_attack_memory_expires_and_reload_clears(lua):
+    lua.execute("_worldTime = 0")
     run_one_tick(lua)
-    lua.execute("""for _, h in ipairs(firedHooks) do
-      h({ OwnerTable = { ObjectId = 7 }, name = "X", ProjectileName = "P" }) end""")
-    lua.execute("AgentBridge.Frame = AgentBridge.Frame + 41")
+    fire(lua, 7, "P")
+    lua.execute("_worldTime = 2.1")
     assert lua.eval("AgentBridge.Snapshot().enemies[1].firedAgo") is None
-    assert lua.eval("#AgentBridge.Snapshot().shots") == 0
-    lua.execute("""for _, h in ipairs(firedHooks) do h({ OwnerTable = { ObjectId = 7 }, name = "X" }) end""")
+    assert lua.eval("#select(2, AgentBridge.Snapshot()).shots") == 0
+    fire(lua, 7)
     lua.execute("for _, h in ipairs(loadHooks) do h({}) end")
-    assert lua.eval("next(AgentBridge.Fired)") is None
+    assert lua.eval("next(AgentBridge.Fired)") is None and lua.eval("next(AgentBridge.VisibleAttackers)") is None

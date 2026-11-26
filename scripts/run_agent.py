@@ -25,6 +25,7 @@ from agent.input import Action, Controller
 from agent.input.quartz import QuartzBackend, focus_game
 from agent.macro.driver import Macro
 from agent.macro.house import equip_keepsake, gift_nectar
+from agent.macro.house_route import HouseVisits, gift_done, mirror_done, rack_done, ready_for_action
 from agent.macro.mirror import spend_darkness
 from agent.policy import HeuristicConfig, HeuristicPolicy, UnstickConfig, UnstickPolicy
 from agent.runs import RunRecorder
@@ -151,8 +152,7 @@ def _loop(a, bridge, rec, combat_cfg, episode_fn, on_episode_end) -> int:
     time.sleep(0.3)
     rooms_left = 0
     runs_started = 0
-    mirror_visit = None  # run count at the last Mirror visit: spend once per House stay
-    gift_visit = rack_visit = None  # same, for the Hall gift and the courtyard keepsake rack
+    visits = HouseVisits()  # once-per-visit gift, Mirror and rack actions (review 016)
     known_keepsakes = None  # from the last rack survey; gifting waits for one (task 013)
     deadline = time.monotonic() + a.max_minutes * 60
     episode = 0
@@ -165,37 +165,59 @@ def _loop(a, bridge, rec, combat_cfg, episode_fn, on_episode_end) -> int:
                 break
             o = bridge.policy_obs() or {}
             room, hero = o.get("room") or {}, o.get("hero") or {}
+            house = o.get("house") or {}
+            visits.observe(house.get("map") if room.get("house") else None)
             if room.get("house"):
-                if o.get("screens"):
+                screens = o.get("screens") or []
+
+                def do_rack():
+                    nonlocal known_keepsakes
+                    rack = equip_keepsake(macro, bridge)
+                    print("keepsake", rack, flush=True)
+                    if "owned" in rack:
+                        known_keepsakes = set(rack["owned"])
+                    visits.record("rack", rack_done(rack))
+                    _house_log(rec, runs_started, visit=visits.visit, keepsake=rack)
+
+                def do_mirror():
+                    purchases = spend_darkness(macro, bridge)
+                    print("mirror purchases", purchases, flush=True)
+                    visits.record("mirror", mirror_done(purchases))
+                    _house_log(rec, runs_started, visit=visits.visit, mirror=purchases,
+                               darkness=house.get("darkness"))
+
+                # An already-open rack or Mirror goes to its own handler, which can
+                # resume from the open menu; once that visit's action is used, close it.
+                if "AwardMenu" in screens or "MetaUpgrade" in screens:
+                    action = "rack" if "AwardMenu" in screens else "mirror"
+                    if visits.pending(action):
+                        (do_rack if action == "rack" else do_mirror)()
+                    else:
+                        c.tap("escape")  # both menus bind Cancel to close
+                        time.sleep(0.8)
+                    continue
+                if screens:
                     pass  # dialogue in the House: handled by the overlay branch below
                 elif runs_started >= a.runs:
                     print("in the House and run budget used; stopping", flush=True)
                     break
+                elif not ready_for_action(o):
+                    time.sleep(0.2)  # wait for a stable frame before reserving an action
+                    continue
                 else:
-                    house = o.get("house") or {}
-                    if house.get("map") == "DeathArea" and gift_visit != runs_started:
-                        gift_visit = runs_started
+                    if house.get("map") == "DeathArea" and visits.pending("gift"):
                         gift = gift_nectar(macro, bridge, known_keepsakes=known_keepsakes)
                         print("gift", gift, flush=True)
                         if "nectar_before" in gift:
                             known_keepsakes = None  # re-survey before another gift
-                        _house_log(rec, runs_started, gift=gift)
+                        visits.record("gift", gift_done(gift))
+                        _house_log(rec, runs_started, visit=visits.visit, gift=gift)
                         continue
-                    if house.get("map") == "RoomPreRun" and rack_visit != runs_started:
-                        rack_visit = runs_started
-                        rack = equip_keepsake(macro, bridge)
-                        print("keepsake", rack, flush=True)
-                        if "owned" in rack:
-                            known_keepsakes = set(rack["owned"])
-                        _house_log(rec, runs_started, keepsake=rack)
+                    if house.get("map") == "RoomPreRun" and visits.pending("rack"):
+                        do_rack()
                         continue
-                    if house.get("map") == "DeathAreaBedroom" and mirror_visit != runs_started:
-                        # Permanent upgrades before each run (docs/plan.md Stage A).
-                        mirror_visit = runs_started
-                        purchases = spend_darkness(macro, bridge)
-                        print("mirror purchases", purchases, flush=True)
-                        _house_log(rec, runs_started, mirror=purchases,
-                                   darkness=(o.get("house") or {}).get("darkness"))
+                    if house.get("map") == "DeathAreaBedroom" and visits.pending("mirror"):
+                        do_mirror()  # permanent upgrades before each run (docs/plan.md Stage A)
                         continue
                     # Route out of the House (DeathLoopData.lua): Great Hall ->
                     # Zagreus's bedroom -> courtyard (RoomPreRun) -> new-run door.
@@ -212,15 +234,24 @@ def _loop(a, bridge, rec, combat_cfg, episode_fn, on_episode_end) -> int:
                     print("House:", house.get("map"), "->", want, flush=True)
                     macro.walk_to(ex["x"], ex["y"], radius=110, timeout=20)
                     macro.interact()
-                    t0 = time.monotonic()
-                    while time.monotonic() - t0 < 15:
-                        h2 = (bridge.policy_obs() or {}).get("house") or {}
-                        if h2.get("map") != house.get("map"):
-                            break
-                        time.sleep(0.2)
-                    if want == "run" and not ((bridge.policy_obs() or {}).get("room") or {}).get("house"):
-                        runs_started += 1
-                        print("new run started", runs_started, flush=True)
+                    if want == "run":
+                        # Count a run only on a real non-House room, never on a
+                        # loading frame (which has no room at all).
+                        t0 = time.monotonic()
+                        while time.monotonic() - t0 < 25:
+                            o2 = bridge.policy_obs() or {}
+                            r2 = o2.get("room") or {}
+                            if r2.get("name") and not r2.get("house") and o2.get("screen") != "LoadScreen":
+                                runs_started += 1
+                                print("new run started", runs_started, flush=True)
+                                break
+                            time.sleep(0.2)
+                    else:
+                        t0 = time.monotonic()
+                        while time.monotonic() - t0 < 15:
+                            if ((bridge.policy_obs() or {}).get("house") or {}).get("map") != house.get("map"):
+                                break
+                            time.sleep(0.2)
                     continue
             if hero.get("dead"):
                 time.sleep(0.5)  # death presentation, then the House loads
