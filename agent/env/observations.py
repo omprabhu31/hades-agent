@@ -38,7 +38,15 @@ HISTORY_SIZE = (
     + PREVIOUS_ACTIONS * sum(ACTION_SIZES)
     + MAX_ENEMIES * 2              # velocity of each enemy slot
 )
-OBSERVATION_SIZE = BASE_SIZE + HISTORY_SIZE
+# Enemy attacks (task 014): which nearby units just attacked, and recent
+# projectile launches (origin, direction, age). Visible: the swing or shot is
+# drawn when it happens. Kept as a separate block so the base layout is stable.
+ATTACK_MEMORY_S = 2.0             # matches the mod's AttackMemory (40 frames x 0.05 s)
+MAX_SHOTS = 4
+SHOT_FIELDS = ("dx", "dy", "dir_cos", "dir_sin", "age", "present")
+ATTACK_SIZE = MAX_ENEMIES + MAX_TRAPS + MAX_SHOTS * len(SHOT_FIELDS)
+HISTORY_START = BASE_SIZE + ATTACK_SIZE
+OBSERVATION_SIZE = BASE_SIZE + ATTACK_SIZE + HISTORY_SIZE
 
 
 def _position(unit: dict) -> tuple[float, float] | None:
@@ -119,6 +127,33 @@ def encode_observation(obs: dict) -> np.ndarray:
     return vector
 
 
+def _recency(seconds_ago) -> float:
+    """1 = attacked just now, falling linearly to 0 at ATTACK_MEMORY_S; 0 if not recent."""
+    if seconds_ago is None:
+        return 0.0
+    return max(0.0, 1.0 - float(seconds_ago) / ATTACK_MEMORY_S)
+
+
+def encode_attacks(obs: dict) -> np.ndarray:
+    """Recent attacks by the enemy and trap slots of the base frame, then shots."""
+    vector = np.zeros(ATTACK_SIZE, dtype=np.float32)
+    hero = obs.get("hero", {})
+    for index, (_, _, _, enemy) in enumerate(nearest_units(hero, obs.get("enemies", []))[:MAX_ENEMIES]):
+        vector[index] = _recency(enemy.get("firedAgo"))
+    for index, (_, _, _, trap) in enumerate(nearest_units(hero, obs.get("traps", []))[:MAX_TRAPS]):
+        vector[MAX_ENEMIES + index] = _recency(trap.get("firedAgo"))
+    offset = MAX_ENEMIES + MAX_TRAPS
+    for index, (_, dx, dy, shot) in enumerate(nearest_units(hero, obs.get("shots", []))[:MAX_SHOTS]):
+        start = offset + index * len(SHOT_FIELDS)
+        theta = math.radians(shot.get("angle") or 0.0)
+        # World angles are screen angles (0 = right, anticlockwise, y down).
+        vector[start:start + len(SHOT_FIELDS)] = (
+            _offset(dx), _offset(dy), math.cos(theta), -math.sin(theta),
+            _fraction((shot.get("age") or 0.0) / ATTACK_MEMORY_S), 1,
+        )
+    return vector
+
+
 class HistoryEncoder:
     """Stateful encoder: the base frame plus recent visible context.
 
@@ -187,4 +222,4 @@ class HistoryEncoder:
                     history[start] = max(-1.0, min(1.0, (location[0] - previous[0]) / VELOCITY_SCALE))
                     history[start + 1] = max(-1.0, min(1.0, (location[1] - previous[1]) / VELOCITY_SCALE))
         self._enemy_positions = positions
-        return np.concatenate([base, history])
+        return np.concatenate([base, encode_attacks(obs), history])

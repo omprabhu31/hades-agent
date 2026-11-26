@@ -18,6 +18,8 @@ function thread(fn, ...) threads[#threads + 1] = { fn = fn, args = { ... } } end
 function wait() coroutine.yield() end
 loadHooks = {}
 function OnAnyLoad(t) loadHooks[#loadHooks + 1] = t[1] end
+firedHooks = {}
+function OnWeaponFired(t) firedHooks[#firedHooks + 1] = t[1] end
 locs = { [1] = { X = 10.04, Y = -5 }, [7] = { X = 1, Y = 2 } }
 function GetLocation(a) return locs[a.Id] end
 speeds = {}
@@ -445,3 +447,30 @@ def test_read_only_mirror_has_no_purchase_controls(lua):
     assert [dict(row) for row in obs.mirror.upgrades.values()] == [
         {"name": "DoorHealMetaUpgrade", "rank": 0, "canBuy": False, "locked": False},
     ]
+
+
+def test_enemy_attacks_recorded_and_hero_ignored(lua):
+    run_one_tick(lua)
+    lua.execute("""
+      for _, h in ipairs(firedHooks) do
+        h({ OwnerTable = { ObjectId = 7 }, name = "SkellyAttack" })
+        h({ OwnerTable = { ObjectId = 7 }, name = "SkellyShot", ProjectileName = "BoneShot" })
+        h({ OwnerTable = { ObjectId = 1 }, name = "SwordWeapon", ProjectileName = "Slash" })
+      end
+    """)
+    lua.execute("AgentBridge.Frame = AgentBridge.Frame + 3")  # three ticks later
+    fired, nshots, name, age, owner = lua.eval("""(function() local o = AgentBridge.Snapshot()
+      return o.enemies[1].firedAgo, #o.shots, o.shots[1].name, o.shots[1].age, o.shots[1].owner end)()""")
+    assert fired == 0.15 and nshots == 1 and name == "BoneShot" and age == 0.15 and owner == 7
+
+
+def test_attack_memory_expires_and_reload_clears(lua):
+    run_one_tick(lua)
+    lua.execute("""for _, h in ipairs(firedHooks) do
+      h({ OwnerTable = { ObjectId = 7 }, name = "X", ProjectileName = "P" }) end""")
+    lua.execute("AgentBridge.Frame = AgentBridge.Frame + 41")
+    assert lua.eval("AgentBridge.Snapshot().enemies[1].firedAgo") is None
+    assert lua.eval("#AgentBridge.Snapshot().shots") == 0
+    lua.execute("""for _, h in ipairs(firedHooks) do h({ OwnerTable = { ObjectId = 7 }, name = "X" }) end""")
+    lua.execute("for _, h in ipairs(loadHooks) do h({}) end")
+    assert lua.eval("next(AgentBridge.Fired)") is None

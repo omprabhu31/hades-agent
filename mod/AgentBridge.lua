@@ -172,7 +172,8 @@ function Sections.units(obs, info, run)
         local name = tostring(e.Name)
         if e.ToggleTrap then
           traps[#traps + 1] = { id = id, name = name, x = round1(ex), y = round1(ey),
-                                disabled = (e.AIDisabled or e.DisableAIWhenReady) == true }
+                                disabled = (e.AIDisabled or e.DisableAIWhenReady) == true,
+                                firedAgo = AB.FiredAgo(id) }
         elseif e.HideHealthBar or name:sub(1, 9) == "Breakable" then
           breakables[#breakables + 1] = { id = id, x = round1(ex), y = round1(ey) }
         elseif not e.Charmed and not allied[name] then
@@ -202,6 +203,7 @@ function Sections.units(obs, info, run)
             for _, a in ipairs(e.EliteAttributes or {}) do attrs[#attrs + 1] = a end
             u.eliteAttrs = attrs
           end
+          u.firedAgo = AB.FiredAgo(id)
           enemies[#enemies + 1] = u
           exact[#exact + 1] = { id = id, hp = e.Health, armor = e.HealthBuffer }
         end
@@ -209,6 +211,7 @@ function Sections.units(obs, info, run)
     end
   end
   obs.enemies, obs.traps, obs.breakables = enemies, traps, breakables
+  obs.shots = AB.RecentShots()
   info.enemyHealth = exact  -- hidden exact values, reward only
 end
 
@@ -561,8 +564,60 @@ hook("KillHero", "hero_died")
 hook("RecordRunCleared", "run_cleared")
 hook("LeaveRoom", "leave_room")
 
+-- Enemy attacks (task 014). The swing or projectile is drawn the moment a
+-- weapon fires, so "this unit just attacked" and where a shot left from is
+-- visible. The game itself registers several OnWeaponFired handlers
+-- (Combat.lua:70, 2259; Powers.lua:7, ...); this one only records, never
+-- waits and never writes triggerArgs or game state. Projectile positions
+-- after launch are not readable (docs/game_state_reference.md section 3),
+-- so a shot is exported as origin + direction + age; the policy can learn
+-- each projectile's travel from its name.
+AB.Fired = AB.Fired or {}
+AB.Shots = AB.Shots or {}
+AB.AttackMemory = 40  -- frames (2 s of game time at the default interval)
+
+function AB.FiredAgo(id)
+  local f = AB.Fired[id]
+  if f == nil then return nil end
+  local age = AB.Frame - f
+  if age > AB.AttackMemory then return nil end
+  return math.floor(age * AB.Interval * 100 + 0.5) / 100  -- seconds of game time
+end
+
+function AB.RecentShots()
+  local out, keep = {}, {}
+  for _, shot in ipairs(AB.Shots) do
+    local age = AB.Frame - shot.frame
+    if age <= AB.AttackMemory then
+      keep[#keep + 1] = shot
+      out[#out + 1] = { owner = shot.owner, name = shot.name, x = shot.x, y = shot.y, angle = shot.angle,
+                        age = math.floor(age * AB.Interval * 100 + 0.5) / 100 }
+    end
+  end
+  AB.Shots = keep
+  return out
+end
+
+OnWeaponFired{ function(triggerArgs)
+  pcall(function()
+    local owner = triggerArgs.OwnerTable
+    if owner == nil or owner.ObjectId == nil or CurrentRun == nil or CurrentRun.Hero == nil
+      or owner.ObjectId == CurrentRun.Hero.ObjectId then return end
+    AB.Fired[owner.ObjectId] = AB.Frame
+    if triggerArgs.ProjectileName ~= nil then
+      local x, y = loc(owner.ObjectId)
+      if x ~= nil then
+        AB.Shots[#AB.Shots + 1] = { owner = owner.ObjectId, name = tostring(triggerArgs.ProjectileName),
+                                    x = round1(x), y = round1(y), angle = angle(owner.ObjectId), frame = AB.Frame }
+        if #AB.Shots > 32 then table.remove(AB.Shots, 1) end
+      end
+    end
+  end)
+end }
+
 OnAnyLoad{ function(triggerArgs)
   AB.Gen = AB.Gen + 1
+  AB.Fired, AB.Shots = {}, {}  -- ids are per map
   AB.SpeedDirty = AB.Speed ~= 1.0  -- re-apply after every map load
   thread(AB.Loop, AB.Gen)
 end }

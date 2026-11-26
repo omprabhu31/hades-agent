@@ -51,6 +51,9 @@ Reading: samples are 6-10 rooms per group, so these differences are within noise
 | 009 | Observation history (`HistoryEncoder`, 183 floats) + more BC data + best-epoch BC | Claude | DONE offline (results in docs/plan.md 3a); live eval pending |
 | 010 | Larger evaluations (>=30 combat rooms per policy) before claiming improvement | open | NEXT |
 | 011 | Mirror of Night: bridge `obs.house.mirror`/`obs.mirror` + `agent/macro/mirror.py` (`spend_darkness`), called once per bedroom visit in run_agent | Codex (impl), Claude (review, integration) | DONE offline; live check pending |
+| 013 | Gifts (Nectar to Cerberus first) and keepsake equip in the House | Codex | IN PROGRESS |
+| 014 | Enemy attack events in the bridge + attack block in the encoder | Claude | DONE offline; review + live pending |
+| 015 | Live session plan: install mod; heuristic runs with Mirror spending to record new data (attack features) and check Mirror/gift flows; retrain BC (history + attacks); eval BC vs heuristic at 1.0 (>=30 combat rooms each); PPO from BC | Claude | NEXT (needs user's window) |
 | 012 | Stage B skills (NPC talk/gifting, Fated List, weapons, Contractor, fishing, Codex, ...) | open | LATER |
 | -- | Projectile perception (no API; consider OnWeaponFired tracking or vision) | open | LATER |
 

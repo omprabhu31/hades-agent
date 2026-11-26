@@ -2,10 +2,11 @@ import math
 
 import numpy as np
 
-from agent.env.observations import (ACTION_SIZES, BASE_SIZE, HISTORY_SIZE, MAX_ENEMIES,
-                                    OBSERVATION_SIZE, PREVIOUS_ACTIONS, HistoryEncoder)
+from agent.env.observations import (ACTION_SIZES, ATTACK_SIZE, BASE_SIZE, HISTORY_SIZE, HISTORY_START,
+                                    MAX_ENEMIES, MAX_TRAPS, OBSERVATION_SIZE, PREVIOUS_ACTIONS,
+                                    HistoryEncoder, encode_attacks)
 
-HIST = BASE_SIZE  # first history column
+HIST = HISTORY_START  # first history column
 ACTIONS_AT = HIST + 6
 ENEMY_VEL_AT = HIST + 6 + PREVIOUS_ACTIONS * sum(ACTION_SIZES)
 
@@ -16,7 +17,7 @@ def frame(x, y, hp=50, angle=90.0, enemies=()):
 
 
 def test_sizes():
-    assert OBSERVATION_SIZE == BASE_SIZE + HISTORY_SIZE
+    assert OBSERVATION_SIZE == BASE_SIZE + ATTACK_SIZE + HISTORY_SIZE
     assert ENEMY_VEL_AT + 2 * MAX_ENEMIES == OBSERVATION_SIZE
 
 
@@ -69,3 +70,16 @@ def test_hud_hidden_hp_not_used():
     hidden = frame(0, 0, hp=10)
     hidden["hud"] = False
     assert enc.encode(hidden)[HIST + 5] == 0  # a hidden HUD cannot reveal a hit
+
+
+def test_attack_block_recency_and_shots():
+    obs = frame(0, 0, enemies=[{"id": 1, "x": 50, "y": 0, "firedAgo": 0.5}, {"id": 2, "x": 900, "y": 0}])
+    obs["traps"] = [{"x": 10, "y": 0, "firedAgo": 0.0}]
+    obs["shots"] = [{"owner": 1, "name": "BoneShot", "x": 50, "y": 0, "angle": 180.0, "age": 1.0}]
+    v = encode_attacks(obs)
+    assert v[0] == np.float32(0.75) and v[1] == 0           # nearest enemy attacked 0.5 s ago
+    assert v[MAX_ENEMIES] == 1.0                              # trap fired just now
+    shot = v[MAX_ENEMIES + MAX_TRAPS:MAX_ENEMIES + MAX_TRAPS + 6]
+    np.testing.assert_allclose(shot, [0.05, 0, -1, 0, 0.5, 1], atol=1e-6)  # flying left, half-way through memory
+    full = HistoryEncoder().encode(obs)
+    np.testing.assert_array_equal(full[BASE_SIZE:HISTORY_START], v)
