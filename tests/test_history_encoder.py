@@ -82,3 +82,31 @@ def test_attack_block_recency():
     assert v[MAX_ENEMIES] == 1.0                              # trap fired just now
     full = HistoryEncoder().encode(obs)
     np.testing.assert_array_equal(full[BASE_SIZE:HISTORY_START], v)
+
+
+def test_velocity_is_per_frame_so_decision_rate_does_not_matter():
+    # Same hero speed (25 units/frame), decided every 2 frames vs every 6 frames.
+    slow, fast = HistoryEncoder(), HistoryEncoder()
+    slow.encode(frame(0, 0), frame=10)
+    a = slow.encode(frame(50, 0), frame=12)
+    fast.encode(frame(0, 0), frame=10)
+    b = fast.encode(frame(150, 0), frame=16)
+    assert a[HIST + 2] == b[HIST + 2] == np.float32(0.5)
+
+
+def test_same_frame_is_not_counted_twice():
+    enc = HistoryEncoder()
+    enc.encode(frame(0, 0), frame=4)
+    first = enc.encode(frame(50, 0), frame=6)
+    again = enc.encode(frame(50, 0), frame=6)   # a step timeout re-reads the frame
+    np.testing.assert_array_equal(first, again)
+    assert enc.encode(frame(50, 0), frame=8)[HIST + 2] == 0   # standing still now
+
+
+def test_stuck_travel_uses_a_game_time_window():
+    enc = HistoryEncoder()
+    enc.encode(frame(0, 0), frame=0)
+    enc.encode(frame(500, 0), frame=2)
+    for f in range(4, 30, 2):
+        v = enc.encode(frame(500, 0), frame=f)   # pinned against a wall
+    assert v[HIST + 4] == 0                      # nothing moved in the last 12 frames

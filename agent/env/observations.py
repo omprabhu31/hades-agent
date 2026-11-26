@@ -28,8 +28,12 @@ BASE_SIZE = (
 # player: facing and motion on screen, the HP bar dropping, their own inputs.
 ACTION_SIZES = (9, 5, 8)          # movement, button, aim (agent.env.actions)
 PREVIOUS_ACTIONS = 2
-TRAIL_STEPS = 6                   # decisions used for the "am I stuck?" travel feature
-VELOCITY_SCALE = 100.0            # world units per decision per normalised unit
+# Motion is measured per bridge frame (0.05 s of game time), not per decision:
+# decisions are ~2 frames apart in BC data, 2-3 live at speed 1 and ~6 at speed
+# 3 (review 012). With 50 units/frame, a 2-frame step gives the old values.
+VELOCITY_PER_FRAME = 50.0         # world units per frame per normalised unit
+TRAIL_FRAMES = 12                 # 0.6 s window for the "am I stuck?" travel feature
+DEFAULT_FRAME_STEP = 2            # assumed spacing when callers pass no frame number
 HISTORY_SIZE = (
     2                              # facing sin, cos
     + 2                            # hero velocity dx, dy
@@ -155,45 +159,53 @@ class HistoryEncoder:
         self.reset()
 
     def reset(self) -> None:
-        self._trail: deque = deque(maxlen=TRAIL_STEPS)
+        self._trail: deque = deque(maxlen=64)  # (frame, position)
+        self._last_frame: int | None = None
         self._last_hp: float | None = None
-        self._steps_since_hit: int | None = None
+        self._hit_frame: int | None = None
         self._enemy_positions: dict = {}
         self._actions: deque = deque(maxlen=PREVIOUS_ACTIONS)
+        self._cached: np.ndarray | None = None
 
     def record_action(self, action) -> None:
         self._actions.append(tuple(int(a) for a in action))
+        self._cached = None
 
-    def encode(self, obs: dict) -> np.ndarray:
+    def encode(self, obs: dict, frame: int | None = None) -> np.ndarray:
+        """Encode one decision frame. `frame` is the bridge frame number (game
+        time); without it, frames are assumed DEFAULT_FRAME_STEP apart."""
+        if frame is None:
+            frame = 0 if self._last_frame is None else self._last_frame + DEFAULT_FRAME_STEP
+        if frame == self._last_frame and self._cached is not None:
+            return self._cached  # same frame again (e.g. a step timeout): nothing new to add
+        elapsed = None if self._last_frame is None else max(1, frame - self._last_frame)
         base = encode_observation(obs)
         history = np.zeros(HISTORY_SIZE, dtype=np.float32)
         hero = obs.get("hero", {})
         angle = hero.get("angle")
         if angle is not None:
             history[0], history[1] = math.sin(math.radians(angle)), math.cos(math.radians(angle))
-        i = 2
         position = _position(hero)
+        if position is not None and self._trail and elapsed is not None:
+            _, (px, py) = self._trail[-1]
+            history[2] = max(-1.0, min(1.0, (position[0] - px) / elapsed / VELOCITY_PER_FRAME))
+            history[3] = max(-1.0, min(1.0, (position[1] - py) / elapsed / VELOCITY_PER_FRAME))
         if position is not None and self._trail:
-            px, py = self._trail[-1]
-            history[i] = max(-1.0, min(1.0, (position[0] - px) / VELOCITY_SCALE))
-            history[i + 1] = max(-1.0, min(1.0, (position[1] - py) / VELOCITY_SCALE))
-        i += 2
-        if position is not None and self._trail:
-            ox, oy = self._trail[0]
-            history[i] = _fraction(math.hypot(position[0] - ox, position[1] - oy) / POSITION_SCALE)
-        i += 1
+            # Oldest remembered position inside the window (or the oldest at all).
+            window = [p for f, p in self._trail if f >= frame - TRAIL_FRAMES] or [self._trail[-1][1]]
+            ox, oy = window[0]
+            history[4] = _fraction(math.hypot(position[0] - ox, position[1] - oy) / POSITION_SCALE)
         if position is not None:
-            self._trail.append(position)
+            self._trail.append((frame, position))
         hp = visible_hud(obs).get("hp")
         if hp is not None:
             if self._last_hp is not None and hp < self._last_hp:
-                self._steps_since_hit = 0
-            elif self._steps_since_hit is not None:
-                self._steps_since_hit += 1
+                self._hit_frame = frame
             self._last_hp = hp
-        if self._steps_since_hit is not None:
-            history[i] = 1.0 / (1.0 + self._steps_since_hit)  # 1 = hit this step, decays
-        i += 1
+        if self._hit_frame is not None:
+            # 1 = hit this frame; halves after 2 frames (the old per-decision decay).
+            history[5] = 1.0 / (1.0 + (frame - self._hit_frame) / DEFAULT_FRAME_STEP)
+        i = 6
         for action in list(self._actions)[::-1]:  # most recent first
             for size, value in zip(ACTION_SIZES, action):
                 if 0 <= value < size:
@@ -207,9 +219,11 @@ class HistoryEncoder:
             if key is not None and location is not None:
                 positions[key] = location
                 previous = self._enemy_positions.get(key)
-                if previous is not None:
+                if previous is not None and elapsed is not None:
                     start = i + slot * 2
-                    history[start] = max(-1.0, min(1.0, (location[0] - previous[0]) / VELOCITY_SCALE))
-                    history[start + 1] = max(-1.0, min(1.0, (location[1] - previous[1]) / VELOCITY_SCALE))
+                    history[start] = max(-1.0, min(1.0, (location[0] - previous[0]) / elapsed / VELOCITY_PER_FRAME))
+                    history[start + 1] = max(-1.0, min(1.0, (location[1] - previous[1]) / elapsed / VELOCITY_PER_FRAME))
         self._enemy_positions = positions
-        return np.concatenate([base, encode_attacks(obs), history])
+        self._last_frame = frame
+        self._cached = np.concatenate([base, encode_attacks(obs), history])
+        return self._cached

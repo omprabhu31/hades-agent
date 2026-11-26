@@ -183,8 +183,10 @@ def _loop(a, bridge, rec, combat_cfg, episode_fn, on_episode_end) -> int:
                     purchases = spend_darkness(macro, bridge)
                     print("mirror purchases", purchases, flush=True)
                     visits.record("mirror", mirror_done(purchases))
+                    # Darkness after the visit, from a fresh frame (review 012).
+                    after = ((bridge.policy_obs() or {}).get("house") or {}).get("darkness")
                     _house_log(rec, runs_started, visit=visits.visit, mirror=purchases,
-                               darkness=house.get("darkness"))
+                               darkness_before=house.get("darkness"), darkness_after=after)
 
                 # An already-open rack or Mirror goes to its own handler, which can
                 # resume from the open menu; once that visit's action is used, close it.

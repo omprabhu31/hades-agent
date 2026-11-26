@@ -223,7 +223,7 @@ class HadesCombatEnv(gym.Env):
             raise TimeoutError(f"No active combat within {self.config.reset_timeout:g} wall seconds")
         self._snapshot = snapshot
         self._encoder.reset()
-        return self._encoder.encode(snapshot.visible), {"raw_obs": deepcopy(snapshot.visible)}
+        return self._encoder.encode(snapshot.visible, snapshot.frame), {"raw_obs": deepcopy(snapshot.visible)}
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
         before = self._snapshot
@@ -280,7 +280,7 @@ class HadesCombatEnv(gym.Env):
         if terminated or truncated:
             self.close()
         info = {"raw_obs": deepcopy(after.visible), "outcome": outcome}
-        return self._encoder.encode(after.visible), float(reward), terminated, truncated, info
+        return self._encoder.encode(after.visible, after.frame), float(reward), terminated, truncated, info
 
     def close(self) -> None:
         self._snapshot = None

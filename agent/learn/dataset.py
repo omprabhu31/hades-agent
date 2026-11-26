@@ -89,7 +89,7 @@ def build_dataset(
                     episodes.append(episode)
                 if last_decision is not None and frame < last_decision + frames_per_step:
                     continue
-                observations.append(encoder.encode(visible))
+                observations.append(encoder.encode(visible, frame))
                 action = teacher.act(visible)
                 encoder.record_action(action)
                 actions.append(action)
