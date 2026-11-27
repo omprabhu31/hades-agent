@@ -40,6 +40,24 @@ DOOR_PRIORITY = {
 }
 
 
+def detour_points(hx: float, hy: float, tx: float, ty: float,
+                  offsets: tuple[float, ...] = (350.0, -350.0, 700.0, -700.0)) -> list[tuple[float, float]]:
+    """Waypoints beside the straight hero-to-target line, nearest first.
+
+    The macro walker has no path planner; when an obstacle blocks the straight
+    line (live 2026-11-26: a door 480 units behind a wall in A_Combat08A held
+    the hero for 14 minutes), trying points to either side of the midpoint
+    usually opens a clear line to the target.
+    """
+    dx, dy = tx - hx, ty - hy
+    length = math.hypot(dx, dy)
+    if length < 1e-6:
+        return []
+    px, py = -dy / length, dx / length  # unit vector perpendicular to the line
+    mx, my = hx + dx / 2, hy + dy / 2
+    return [(mx + px * off, my + py * off) for off in offsets]
+
+
 def choose_door(obs: dict) -> dict | None:
     """Pick a lit exit door, preferring higher-value rewards, then nearer ones."""
     hero = obs.get("hero") or {}

@@ -210,6 +210,14 @@ class Controller:
         if first_error is not None:
             raise first_error
 
+    def ensure_safe(self) -> None:
+        """Raise InputStopped on a STOP file or human override, even while idle.
+
+        Loops that wait without sending input call this so a stop request is
+        honoured without waiting for the next key press.
+        """
+        self._check_safety()
+
     def _check_safety(self) -> tuple[Bounds, Point]:
         if self._stop_reason is not None:
             raise InputStopped(self._stop_reason)

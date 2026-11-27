@@ -79,9 +79,21 @@ def _wait(bridge, map_name: str, condition, timeout: float, *, dialogue_macro=No
         time.sleep(_POLL)
 
 
-def _walk(macro, target: dict) -> bool:
+def _prompt_shown(obs: dict | None, target_id) -> bool:
+    """True when the target's use prompt is drawn (the hero is in use range)."""
+    house = (obs or {}).get("house") or {}
+    rows = list(house.get("characters") or ()) + [house.get("keepsakeRack") or {}]
+    return any(row.get("id") == target_id and row.get("usePrompt") for row in rows)
+
+
+def _walk(macro, bridge, target: dict) -> bool:
+    # Large characters block the hero well outside 90 units (live 2026-11-26:
+    # Cerberus's prompt showed at 221 and the hero could get no closer), so stop
+    # as soon as the target's prompt is on screen.
     try:
-        return target.get("usePrompt") or macro.walk_to(target["x"], target["y"], radius=90, timeout=10)
+        return target.get("usePrompt") or macro.walk_to(
+            target["x"], target["y"], radius=90, timeout=10,
+            until=lambda: _prompt_shown(bridge.policy_obs(), target["id"]))
     except MacroError:
         return False
 
@@ -112,7 +124,7 @@ def gift_nectar(
     result["target"] = npc["name"]
     if house.get("nectar") == 0:
         return dict(result, status="no_nectar")
-    if not _walk(macro, npc):
+    if not _walk(macro, bridge, npc):
         return dict(result, status="target_unreachable")
     npc_id = npc["id"]
     obs = _wait(bridge, map_name, lambda obs: _active_character(obs, npc_id), _PROMPT_TIMEOUT)
@@ -180,7 +192,7 @@ def equip_keepsake(macro, bridge, choice: str | None = None) -> dict:
         return {"status": "rack_unavailable"}
     if not _only_screen(obs, "AwardMenu"):
         rack = house.get("keepsakeRack")
-        if not rack or not _walk(macro, rack):
+        if not rack or not _walk(macro, bridge, rack):
             return {"status": "rack_unreachable"}
         obs = _wait(bridge, map_name, lambda obs: _world(obs) and
                     (obs["house"].get("keepsakeRack") or {}).get("promptTarget"), _PROMPT_TIMEOUT)

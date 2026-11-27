@@ -188,3 +188,13 @@ def test_cleanup_attempts_all_releases_after_a_failure(setup_input, monkeypatch)
             controller.release_all()
     controller.release_all()
     assert backend.events == [("key_down", 0x0D), ("key_down", 0x02), ("key_up", 0x0D), ("key_up", 0x02)]
+
+
+def test_ensure_safe_raises_on_stop_file_without_input(setup_input):
+    controller, backend, stop_file = setup_input
+    with controller:
+        controller.ensure_safe()
+        stop_file.touch()
+        with pytest.raises(InputStopped, match="Stop file present"):
+            controller.ensure_safe()
+    assert not [e for e in backend.events if e[0] != "move"]

@@ -51,6 +51,9 @@ def macro_fakes(monkeypatch, tmp_path):
         def apply(self, action):
             assert action.movement is None and not action.buttons
 
+        def ensure_safe(self):
+            pass
+
     class Env:
         def __init__(self, bridge, _controller, *, window_size, config):
             self.bridge = bridge

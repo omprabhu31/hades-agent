@@ -70,6 +70,8 @@ class EpisodeMetrics:
                 "kills": self.kills, "game_seconds": round((self.frame - self.f0) * 0.05, 2)}
 
 
+MAX_DOOR_FAILURES = 6  # per room, before the run stops itself
+
 def policy_episode(policy):
     """Default combat episode: step the env with a policy acting on raw_obs.
 
@@ -154,6 +156,8 @@ def _loop(a, bridge, rec, combat_cfg, episode_fn, on_episode_end) -> int:
     runs_started = 0
     visits = HouseVisits()  # once-per-visit gift, Mirror and rack actions (review 016)
     known_keepsakes = None  # from the last rack survey; gifting waits for one (task 013)
+    hud_hidden_since = None  # when the House HUD was first seen hidden
+    failed_doors: dict = {}  # room name -> door attempts that did not reach the door
     deadline = time.monotonic() + a.max_minutes * 60
     episode = 0
     with Controller(QuartzBackend(wid)) as c:
@@ -163,6 +167,7 @@ def _loop(a, bridge, rec, combat_cfg, episode_fn, on_episode_end) -> int:
             if not running_game_pids():
                 print("Hades exited; stopping", flush=True)
                 break
+            c.ensure_safe()  # honour STOP / mouse override in idle waits too
             o = bridge.policy_obs() or {}
             room, hero = o.get("room") or {}, o.get("hero") or {}
             house = o.get("house") or {}
@@ -204,7 +209,15 @@ def _loop(a, bridge, rec, combat_cfg, episode_fn, on_episode_end) -> int:
                     print("in the House and run budget used; stopping", flush=True)
                     break
                 elif not ready_for_action(o):
-                    time.sleep(0.2)  # wait for a stable frame before reserving an action
+                    # Wait for a stable frame before reserving an action. A
+                    # hidden HUD in a plain House frame only means the hero is
+                    # idle, so after a second a short step brings it back.
+                    if not o.get("hud") and o.get("screen") in (None, "InGameUI"):
+                        hud_hidden_since = hud_hidden_since or time.monotonic()
+                        if time.monotonic() - hud_hidden_since > 1.0:
+                            macro.wake_hud()
+                            hud_hidden_since = None
+                    time.sleep(0.2)
                     continue
                 else:
                     if house.get("map") == "DeathArea" and visits.pending("gift"):
@@ -323,6 +336,14 @@ def _loop(a, bridge, rec, combat_cfg, episode_fn, on_episode_end) -> int:
                 start = room.get("name")
                 door = macro.take_door()
                 print("door", door and door.get("reward"), flush=True)
+                if door is None:
+                    # Could not reach the exit. Give up rather than loop for
+                    # minutes (live 2026-11-26: 26 attempts in one room).
+                    failed_doors[start] = failed_doors.get(start, 0) + 1
+                    if failed_doors[start] >= MAX_DOOR_FAILURES:
+                        print("cannot reach a door in", start, "; stopping", flush=True)
+                        break
+                    continue
                 t0 = time.monotonic()
                 while time.monotonic() - t0 < 15:
                     if ((bridge.policy_obs() or {}).get("room") or {}).get("name") not in (None, start):

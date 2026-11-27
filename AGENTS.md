@@ -56,4 +56,5 @@ The lead asks the user through the host's interactive question tool, not in plai
 - Scope: first pass focuses on beating the game end to end (permanent buffs such as the Mirror of Night are in scope where they help); the long-term goal is for the agent to do everything a player can do in the game autonomously (talking to characters, side quests, unlocking weapons and permanent boosts, and the rest). See `docs/plan.md` "Scope and roadmap" (user instruction, 2026-11-26).
 - Only one Hades instance may run at a time (user instruction, 2026-11-26).
 - Record a video clip of each training iteration/episode as visible, measurable evidence of improvement (user instruction, 2026-11-26).
+- If Claude is about to run out of usage, it hands the lead to Grok first, with `collab/STATUS.md` and a lead handoff in `collab/handoffs/` current enough to resume from (user instruction, 2026-11-26).
 - Save every training run separately with its results, parameters and everything associated with it (user instruction, 2026-11-26).

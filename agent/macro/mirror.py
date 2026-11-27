@@ -15,6 +15,11 @@ _PRIORITY = {
     "BackstabMetaUpgrade": 5,  # Shadow Presence
     "StoredAmmoVulnerabilityMetaUpgrade": 6,  # Boiling Blood
 }
+# The Mirror stands against the bedroom wall: live on 2026-11-26 the hero
+# could get no closer than about 122 units to its anchor, so a 90-unit walk
+# radius never arrived. Doors interact from up to 260, so 160 is assumed to
+# be inside the Mirror's use range (to be confirmed by a live purchase).
+_REACH = 160.0
 _OPEN_TIMEOUT = 5.0
 _PURCHASE_TIMEOUT = 3.0
 _CLOSE_TIMEOUT = 3.0
@@ -83,7 +88,7 @@ def spend_darkness(macro, bridge, max_purchases: int = 10) -> list[dict]:
         if target is None or obs.get("screens"):
             return []
         try:
-            arrived = macro.walk_to(target["x"], target["y"], radius=90, timeout=10)
+            arrived = macro.walk_to(target["x"], target["y"], radius=_REACH, timeout=10)
         except MacroError:
             return []
         obs = bridge.policy_obs() or {}

@@ -41,3 +41,11 @@ def test_locked_boon_cards_skipped():
     menu = {"options": [{"index": 1, "name": "A", "rarity": "Epic", "locked": True},
                         {"index": 2, "name": "B", "rarity": "Common"}]}
     assert choose_boon_option(menu)["index"] == 2
+
+
+def test_detour_points_flank_the_straight_line():
+    from agent.macro.rules import detour_points
+    points = detour_points(0, 0, 100, 0)
+    assert points[0] == (50, 350) and points[1] == (50, -350)
+    assert [abs(y) for _, y in points] == [350, 350, 700, 700]
+    assert detour_points(5, 5, 5, 5) == []

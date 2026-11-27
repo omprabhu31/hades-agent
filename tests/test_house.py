@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import ANY, Mock
 
 import pytest
 
@@ -122,7 +122,7 @@ def test_gift_walks_talks_and_verifies_one_nectar_with_dialogue(clock):
     assert gift_nectar(macro, bridge, known_keepsakes=[]) == {
         "target": CERBERUS["name"], "status": "gifted", "nectar_before": 1, "nectar_after": 0, "settled": True,
     }
-    macro.walk_to.assert_called_once_with(480, 360, radius=90, timeout=10)
+    macro.walk_to.assert_called_once_with(480, 360, radius=90, timeout=10, until=ANY)
     macro.interact.assert_called_once_with()
     macro.c.tap.assert_called_once_with("gift")
     assert macro.click_ui.call_count == 2
@@ -186,7 +186,7 @@ def test_equip_walks_through_rack_prompt_selects_and_confirms_hud_icon(clock):
     macro.interact.side_effect = interact
     macro.click_ui.side_effect = click
     assert equip_keepsake(macro, bridge) == {"status": "equipped", "owned": [TOOTH, COLLAR], "choice": COLLAR}
-    macro.walk_to.assert_called_once_with(210, 650, radius=90, timeout=10)
+    macro.walk_to.assert_called_once_with(210, 650, radius=90, timeout=10, until=ANY)
     macro.interact.assert_called_once_with()
     assert [call.args for call in macro.click_ui.call_args_list] == [(400, 280), (960, 1030)]
 
@@ -228,3 +228,17 @@ def test_equip_distinguishes_selected_from_applied(clock):
     macro.click_ui.side_effect = click
     assert equip_keepsake(macro, bridge) == {"status": "unconfirmed", "owned": [COLLAR], "choice": COLLAR}
     assert clock.monotonic() >= house._UPDATE_TIMEOUT
+
+
+def test_walk_stops_when_target_prompt_shows_outside_radius():
+    # Live 2026-11-26: Cerberus's prompt showed at 221 units and the hero could not get closer.
+    bridge = Mock()
+    target = {"id": 7, "x": 0, "y": 0, "usePrompt": False}
+    bridge.policy_obs.return_value = {"house": {"characters": [{**target, "usePrompt": True}]}}
+    macro = Mock()
+    macro.walk_to.side_effect = lambda *a, until, **k: until()
+    assert house._walk(macro, bridge, target)
+    bridge.policy_obs.return_value = {"house": {"characters": [{**target, "id": 8, "usePrompt": True}]}}
+    assert not house._walk(macro, bridge, target)
+    bridge.policy_obs.return_value = {"house": {"keepsakeRack": {**target, "usePrompt": True}}}
+    assert house._walk(macro, bridge, target)

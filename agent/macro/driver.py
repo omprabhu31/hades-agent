@@ -6,7 +6,7 @@ import time
 
 from agent.input import Action
 
-from .rules import choose_boon_option, choose_door, ui_to_window, world_dir_to_movement
+from .rules import choose_boon_option, choose_door, detour_points, ui_to_window, world_dir_to_movement
 
 
 class MacroError(RuntimeError):
@@ -29,16 +29,21 @@ class Macro:
         h = self.obs().get("hero") or {}
         return h.get("x"), h.get("y")
 
-    def walk_to(self, x: float, y: float, radius: float = 90.0, timeout: float = 10.0) -> bool:
+    def walk_to(self, x: float, y: float, radius: float = 90.0, timeout: float = 10.0,
+                until=None) -> bool:
         """Walk in a straight line (8 directions) until within radius.
 
         If progress stalls (a wall), sidestep with the neighbouring direction
-        for a moment. Returns True when arrived.
+        for a moment. Returns True when arrived, or as soon as the optional
+        `until()` is true (e.g. the target's use prompt is on screen, which can
+        happen well outside `radius` for large characters such as Cerberus).
         """
         deadline = time.monotonic() + timeout
         last_d, stall_t, stalls = None, time.monotonic(), 0
         try:
             while time.monotonic() < deadline:
+                if until is not None and until():
+                    return True
                 hx, hy = self.hero_xy()
                 if hx is None:
                     return False
@@ -74,6 +79,15 @@ class Macro:
         return (0.5 + r * math.cos(theta) / self.bounds.width,
                 0.5 - r * math.sin(theta) / self.bounds.height)
 
+    def wake_hud(self, movement: str = "down") -> None:
+        """Take one short step. The House hides the combat HUD while the hero
+        stands still and redraws it on movement (seen live 2026-11-26)."""
+        try:
+            self.c.apply(Action(movement=movement))
+            time.sleep(0.15)
+        finally:
+            self.c.apply(Action())
+
     def interact(self) -> None:
         self.c.tap("interact", hold_s=0.08)
 
@@ -108,11 +122,22 @@ class Macro:
         door = choose_door(self.obs())
         if door is None:
             return None
-        self.walk_to(door["x"], door["y"], radius=120, timeout=15)
-        hx, hy = self.hero_xy()
         # Doors in alcoves cannot always be reached to 120 units, but the use
         # prompt works from further away; try whenever reasonably close.
-        if hx is not None and math.hypot(door["x"] - hx, door["y"] - hy) < 260:
+        def close_enough() -> bool:
+            hx, hy = self.hero_xy()
+            return hx is not None and math.hypot(door["x"] - hx, door["y"] - hy) < 260
+
+        self.walk_to(door["x"], door["y"], radius=120, timeout=10)
+        if not close_enough():
+            hx, hy = self.hero_xy()
+            if hx is not None:
+                for wx, wy in detour_points(hx, hy, door["x"], door["y"]):
+                    self.walk_to(wx, wy, radius=100, timeout=4)
+                    self.walk_to(door["x"], door["y"], radius=120, timeout=6)
+                    if close_enough():
+                        break
+        if close_enough():
             self.interact()
             return door
         return None

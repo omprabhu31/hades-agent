@@ -78,7 +78,7 @@ def test_spend_waits_for_each_rank_and_uses_refreshed_menu(clock):
         {"name": "ExtraChanceMetaUpgrade", "rank": 1, "cost": 30},
         {"name": "DoorHealMetaUpgrade", "rank": 1, "cost": 10},
     ]
-    macro.walk_to.assert_called_once_with(480, 190, radius=90, timeout=10)
+    macro.walk_to.assert_called_once_with(480, 190, radius=mirror._REACH, timeout=10)
     macro.interact.assert_called_once_with()
     assert [call.args for call in macro.click_ui.call_args_list] == [(1155, 372), (1155, 417), (954, 996)]
 
