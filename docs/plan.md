@@ -67,3 +67,11 @@ Next, in order:
 3b. **Enemy attacks (task 014, 2026-11-26, offline; revised after review 016).** The mod records non-hero `OnWeaponFired` events (a passive subscriber, like the game's own), but only for owners the policy already sees as enemies or traps, aged on the game's world clock. It exports `firedAgo` per enemy/trap; projectile launches (`info.shots`, shooter pose + age) are logging-only because their drawn cue and path are unverified. The encoder adds a 12-float attack block between the base frame and history (observation 195 floats). History motion features are per bridge frame (game time), so they do not depend on the decision rate or game speed (review 012). Older logs have no attack data, so the next live session must first record heuristic play with the new mod before retraining BC.
 4. **Perception gaps.** Projectiles and telegraphs (see Known gaps); try a small downsampled screen channel if the vector policy plateaus.
 5. **Meta-progression.** Mirror of Night purchases between runs (Darkness), keepsakes, weapon choice once unlocked; bosses (Megaera first).
+
+### Live session 015 (2026-11-26/27)
+
+- House flows verified in the game after three fixes. The Mirror and Cerberus block the hero outside the old 90-unit walk radius: the Mirror now uses a 160-unit reach, and NPC walks stop when the use prompt shows. The House hides the HUD while the hero is idle, so a short step now wakes it. Purchases: Death Defiance 1, Chthonic Vitality 1-3, Shadow Presence 1-5. Nectar was given to Cerberus, and the Old Spiked Collar was equipped.
+- Heuristic with those upgrades: 19 combat rooms, 84% cleared, deaths at depth 6, 7 and 7. Without upgrades the baseline was 60% cleared, with deaths at depth 3-4. Treat the gain as coming from the upgrades, not the policy.
+- BC v6 (history + attack features, new data): held-out accuracy 84.7% movement, 92.4% button, 94.1% aim (best epoch 46 of 80).
+- New: door detours and a per-room give-up (`MAX_DOOR_FAILURES`), the optional `whiff_penalty` reward term (off by default), and `Controller.ensure_safe()` for idle loops.
+- Next: tasks 018 (BC v6 against the heuristic under the same Mirror state, then PPO from BC v6), 019 (PPO with and without the whiff penalty) and 020 (the Mirror use prompt in the mod).

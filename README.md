@@ -4,15 +4,22 @@ An agent that learns to play [Hades](https://www.supergiantgames.com/games/hades
 
 This is a hobby project. It is not affiliated with or endorsed by Supergiant Games, and it needs your own copy of the game.
 
-## Status (26 November 2026)
+## Status (27 November 2026)
 
-**The agent can play full escape attempts on its own, but it does not get far yet.** It fights, picks boons and hammers, clicks through dialogue, collects rewards, chooses doors, and after a death walks back through the House of Hades to start a new attempt. Every attempt so far has died in Tartarus, the first region, at chamber depth 2 to 5. Reinforcement learning has started but has not yet produced a measurable improvement over the hand-written policy.
+**The agent plays full escape attempts on its own and now builds up permanent upgrades between them, but it has not yet cleared Tartarus.** It fights, picks boons and hammers, clicks through dialogue, collects rewards and chooses doors. After a death it walks through the House of Hades, where it:
+
+- buys Mirror of Night upgrades;
+- gives Nectar to Cerberus, and equips the keepsake he gives back;
+- starts the next attempt.
+
+The furthest it has got is chamber depth 7, where it reached the first mini-boss. Reinforcement learning runs but has not yet produced a measurable improvement over the hand-written policy.
 
 | Milestone | State |
 |---|---|
 | Read the game state (visible information only) | Done |
 | Drive the game with synthetic keyboard and mouse | Done |
 | Play rooms, boons, doors, dialogue, the House, unattended | Done |
+| Permanent upgrades: Mirror of Night, Nectar gifts, keepsakes | Done (verified in the game) |
 | Record every run (parameters, metrics, clips) | Done |
 | Learning pipeline (behaviour cloning, then PPO) | Running; no reliable gain yet |
 | Clear Tartarus, beat Megaera | Not yet |
@@ -20,22 +27,23 @@ This is a hobby project. It is not affiliated with or endorsed by Supergiant Gam
 
 ### Latest results
 
-Combat chambers only (the easy opening chamber is excluded). Speed is game speed during the episodes measured.
+Combat chambers only (the easy opening chamber is excluded), all at normal game speed.
 
-| Policy | Speed | Chambers | Cleared | Damage taken per chamber | Kills per chamber | Died at depth |
+| Policy | Permanent upgrades | Chambers | Cleared | Damage taken per chamber | Kills per chamber | Died at depth |
 |---|---|---|---|---|---|---|
-| Hand-written baseline | 1x | 10 | 60% | 21.3 | 3.9 | 3, 3, 3, 4 |
-| PPO cycle 1 (evaluation) | 1x | 7 | 71% | 14.3 | 5.6 | 5, 4 |
-| PPO cycle 2 (evaluation) | 1x | 7 | 57% | 21.0 | 8.3 | 2, 5, 3 |
+| Hand-written baseline | none | 10 | 60% | 21.3 | 3.9 | 3, 3, 3, 4 |
+| PPO cycle 1 (evaluation) | none | 7 | 71% | 14.3 | 5.6 | 5, 4 |
+| PPO cycle 2 (evaluation) | none | 7 | 57% | 21.0 | 8.3 | 2, 5, 3 |
+| Hand-written, with upgrades | Death Defiance, Chthonic Vitality, Shadow Presence, Old Spiked Collar | 19 | 84% | 19.6 | 7.5 | 6, 7, 7 |
 
-With 7 to 10 chambers per policy, these differences are within noise: chamber types and boons vary between attempts. The next evaluations will use at least 30 chambers per policy before any improvement is claimed.
+The last row reached deeper chambers mainly because of the permanent upgrades, not a better policy. With 7 to 19 chambers per row, the differences are within noise. Policies will be compared with at least 30 chambers each, under the same upgrades, before any improvement is claimed.
 
 ### What is being worked on next
 
-1. **Observation history.** The learned policy copies the hand-written one poorly: about 40% agreement on movement and 30% on aim in held-out chambers. That policy's choices depend on recent movement and button presses, which the current observation does not include. Next is adding previous actions, velocity and recent positions, and collecting more data.
-2. **Larger evaluations**, so changes can be measured with confidence.
-3. **Perception gaps.** There is no game data for projectile positions or attack warnings. Options are tracking attack events, or adding a small downscaled screen image to the observation.
-4. **Permanent boosts.** Spend Darkness at the Mirror of Night between runs (Death Defiance and max-HP upgrades first), then the first boss.
+1. **Cloned policy against the hand-written one.** The cloned policy now sees recent actions, its own and enemies' movement, recent hits, and which visible enemies just attacked. On held-out chambers it agrees with the hand-written policy 85% of the time on movement, 92% on buttons and 94% on aim. Next is a live comparison over at least 30 chambers each, then PPO starting from it.
+2. **Wasted attacks.** The hand-written policy swings whenever an enemy is roughly in range. The reward has no direct cost for a swing that hits nothing, so an optional penalty for that will be tested in its own PPO cycle.
+3. **Getting around obstacles.** Movement between points is a straight line with sidesteps. A door behind an obstacle once held the agent for 14 minutes; it now tries detours, and stops itself if it still can't reach the door.
+4. **The first bosses**, starting with Megaera.
 
 ## Scope
 
@@ -84,7 +92,7 @@ python -m scripts.make_report                 # runs/report.html: comparison tab
 python -m scripts.quit_game                   # always quit through the game menus
 ```
 
-Learned policies: `scripts/train_bc.py`, `scripts/train_ppo.py` and `scripts/eval_policy.py`. Checks: `python -m pytest -q tests` (108 tests) and `python -m pyflakes scripts agent`.
+Learned policies: `scripts/train_bc.py`, `scripts/train_ppo.py` and `scripts/eval_policy.py`. Checks: `python -m pytest -q tests` (163 tests) and `python -m pyflakes scripts agent`.
 
 Use a spare save slot. The mod never changes gameplay, and `mod/uninstall.sh` restores the original game script.
 

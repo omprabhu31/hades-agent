@@ -26,6 +26,8 @@ def add_live_arguments(parser: argparse.ArgumentParser, *, name: str) -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", choices=("auto", "cpu", "mps"), default="auto")
     parser.add_argument("--name", default=name)
+    parser.add_argument("--whiff-penalty", type=float, default=0.0,
+                        help="reward cost per attack with no enemy damage within 0.5 s (0 = off)")
 
 
 def validate_live_arguments(args: argparse.Namespace) -> None:
@@ -48,7 +50,7 @@ def run_live(args: argparse.Namespace, *, extra_meta: dict, **options) -> int:
     return run_agent.main(
         ["--max-episodes", str(args.episodes), "--rooms", str(sys.maxsize), "--runs", str(args.runs),
          "--speed", str(args.speed), "--max-minutes", str(args.max_minutes), "--seed", str(args.seed),
-         "--name", args.name],
+         "--name", args.name, "--whiff-penalty", str(args.whiff_penalty)],
         extra_meta={"slot": args.slot, "save_backup": str(backup), **extra_meta},
         **options,
     )

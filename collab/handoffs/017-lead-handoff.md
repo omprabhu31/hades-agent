@@ -1,5 +1,5 @@
 # 017: Lead handoff (Claude to Grok if Claude runs out of usage)
-Status: STANDBY (used only if Claude stops mid-session)
+Status: STANDBY (not used in session 015; the next live window starts from task 018 in STATUS.md)
 Owner: Grok (fallback lead)
 
 ## Goal

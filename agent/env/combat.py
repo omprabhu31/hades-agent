@@ -15,7 +15,7 @@ import numpy as np
 from agent.bridge.game import BridgeMessage
 from agent.input import Action
 
-from .actions import AIM_SECTORS, BUTTONS, MOVEMENTS, decode_action
+from .actions import AIM_SECTORS, ATTACK, BUTTONS, MOVEMENTS, decode_action
 from .observations import OBSERVATION_SIZE, HistoryEncoder
 
 
@@ -39,10 +39,17 @@ class RewardConfig:
     room_clear_bonus: float = 2.0
     death_penalty: float = 2.0
     time_penalty: float = 0.01         # per decision
+    # Optional cost for an attack decision followed by no enemy damage within
+    # whiff_window_steps decisions (user question 2026-11-27 on weapon
+    # spamming). Off by default so earlier runs stay comparable.
+    whiff_penalty: float = 0.0
+    whiff_window_steps: int = 5        # 0.5 s of game time at two frames per step
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.enemy_damage_scale) or self.enemy_damage_scale <= 0:
             raise ValueError("enemy_damage_scale must be positive and finite")
+        if not math.isfinite(self.whiff_penalty) or self.whiff_penalty < 0 or self.whiff_window_steps < 1:
+            raise ValueError("whiff_penalty must be non-negative and the window at least one step")
 
 
 @dataclass(frozen=True)
@@ -119,6 +126,15 @@ def _enemy_health(reward_data: dict) -> dict | None:
     }
 
 
+def _damage_dealt(before: _Snapshot, after: _Snapshot) -> bool:
+    """Whether any enemy lost health or disappeared (hidden data, reward only)."""
+    old = _enemy_health(before.message.data.get("info") or {})
+    new = _enemy_health(after.message.data.get("info") or {})
+    if old is None or new is None:
+        return False
+    return any(enemy_id not in new or new[enemy_id] < health for enemy_id, health in old.items())
+
+
 def _combat_reward(before: _Snapshot, after: _Snapshot, outcome: str | None, config: RewardConfig) -> float:
     """Hidden bridge data is read here for reward calculation only."""
     old = before.message.data.get("info") or {}
@@ -174,6 +190,7 @@ class HadesCombatEnv(gym.Env):
         self.observation_space = gym.spaces.Box(-1.0, 1.0, (OBSERVATION_SIZE,), np.float32)
         self._snapshot: _Snapshot | None = None
         self._steps = 0
+        self._pending_attacks: list[int] = []  # decision indices awaiting a hit (whiff penalty)
         self._speed_set = False
         # Per-episode visible history (previous actions, motion), task 009.
         self._encoder = HistoryEncoder()
@@ -205,6 +222,7 @@ class HadesCombatEnv(gym.Env):
         super().reset(seed=seed)
         self.close()
         self._steps = 0
+        self._pending_attacks = []
         deadline = time.monotonic() + self.config.reset_timeout
 
         def active(snapshot: _Snapshot) -> bool:
@@ -273,6 +291,7 @@ class HadesCombatEnv(gym.Env):
             if outcome is None and self._steps >= self.config.max_steps:
                 outcome = "step_limit"
             reward = _combat_reward(before, after, outcome, self.config.reward)
+            reward -= self._whiff_cost(before, after, action, outcome)
 
         terminated = outcome in ("cleared", "dead")
         truncated = outcome in ("timeout", "step_limit", "room_changed")
@@ -281,6 +300,19 @@ class HadesCombatEnv(gym.Env):
             self.close()
         info = {"raw_obs": deepcopy(after.visible), "outcome": outcome}
         return self._encoder.encode(after.visible, after.frame), float(reward), terminated, truncated, info
+
+    def _whiff_cost(self, before: _Snapshot, after: _Snapshot, action: np.ndarray, outcome: str | None) -> float:
+        cfg = self.config.reward
+        if cfg.whiff_penalty <= 0:
+            return 0.0
+        # The swing just made counts as answered by damage seen this step too.
+        if outcome is None and int(action[1]) == ATTACK:
+            self._pending_attacks.append(self._steps)
+        if _damage_dealt(before, after):
+            self._pending_attacks = []
+        expired = [i for i in self._pending_attacks if self._steps - i >= cfg.whiff_window_steps]
+        self._pending_attacks = [i for i in self._pending_attacks if self._steps - i < cfg.whiff_window_steps]
+        return cfg.whiff_penalty * len(expired)
 
     def close(self) -> None:
         self._snapshot = None

@@ -20,7 +20,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 
 from agent.bridge import LogTailBridge, running_game_pids
-from agent.env import CombatConfig, HadesCombatEnv
+from agent.env import CombatConfig, HadesCombatEnv, RewardConfig
 from agent.input import Action, Controller
 from agent.input.quartz import QuartzBackend, focus_game
 from agent.macro.driver import Macro
@@ -107,12 +107,15 @@ def main(argv=None, *, policy=None, policy_name=None, episode_fn=None,
     p.add_argument("--name", default="heuristic")
     p.add_argument("--no-clips", action="store_true")
     p.add_argument("--max-episodes", type=int, default=0, help="stop after this many combat episodes (0 = no limit)")
+    p.add_argument("--whiff-penalty", type=float, default=0.0,
+                   help="reward cost per attack with no enemy damage within 0.5 s (0 = off)")
     a = p.parse_args(argv)
 
     bridge = LogTailBridge()
     if bridge.policy_obs() is None:
         raise SystemExit("no observations: start scripts.run_game --obs-every 1 first")
-    combat_cfg = CombatConfig(reset_timeout=5.0, game_speed=a.speed)
+    combat_cfg = CombatConfig(reset_timeout=5.0, game_speed=a.speed,
+                              reward=RewardConfig(whiff_penalty=a.whiff_penalty))
     policy_cfg = HeuristicConfig()
     if policy is None and episode_fn is None:
         policy = UnstickPolicy(HeuristicPolicy(policy_cfg), UnstickConfig())

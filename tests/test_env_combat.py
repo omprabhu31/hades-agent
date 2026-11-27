@@ -339,3 +339,33 @@ def test_runner_executes_heuristic_with_only_fake_events(harness, monkeypatch, t
     assert slots == [2]
     assert result == {"room": "RoomA", "depth": 2, "steps": 1, "return": 2.54, "outcome": "cleared"}
     assert [event[0] for event in backend.events] == ["move", "mouse_down", "mouse_up"]
+
+
+def test_whiff_penalty_charges_attacks_without_damage_after_the_window(harness):
+    bridge, controller, clock = harness
+    hidden = {"enemyHealth": [{"id": 1, "hp": 20}]}
+    bridge.publish(1, scene(), hidden)
+    health = [20]
+
+    def apply():
+        frame = bridge.latest_obs.frame + 2
+        clock.after(0.01, lambda: bridge.publish(frame, scene(), {"enemyHealth": [{"id": 1, "hp": health[0]}]}))
+
+    controller.on_apply = apply
+    config = CombatConfig(reward=RewardConfig(time_penalty=0.0, whiff_penalty=0.1, whiff_window_steps=2))
+    env = HadesCombatEnv(bridge, controller, config=config)
+    env.reset()
+    attack, idle = np.array([0, 1, 0]), np.array([0, 0, 0])
+    rewards = [env.step(attack)[1], env.step(idle)[1], env.step(idle)[1]]
+    assert rewards == pytest.approx([0.0, 0.0, -0.1])  # charged once two decisions pass without a hit
+
+    env.step(attack)
+    health[0] = 10  # the next swing lands: no charge, damage reward only
+    assert env.step(idle)[1] == pytest.approx(0.1)
+    assert env.step(idle)[1] == pytest.approx(0.0)
+
+
+def test_whiff_penalty_is_off_by_default():
+    assert RewardConfig().whiff_penalty == 0.0
+    with pytest.raises(ValueError):
+        RewardConfig(whiff_penalty=-1)

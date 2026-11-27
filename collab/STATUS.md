@@ -1,6 +1,6 @@
 # Status
 
-Phase 3 started: learning pipeline (BC + PPO) runs live; no measurable improvement over the heuristic yet. Session ended 2026-11-26 ~16:00 with Hades quit cleanly, no agents or scripts running, nothing committed. Updated 2026-11-26 14:05 by Claude (lead). Repo renamed to `hades-agent` 2026-11-26 (user request).
+Phase 3: learning pipeline (BC + PPO). Live session 015 (2026-11-26 21:07-21:48) verified the House flows (Mirror purchases, Nectar gift, keepsake equip) and recorded new heuristic data with attack features; BC v6 trained 2026-11-27. The BC-vs-heuristic evaluation is still pending (user chose "Later" for the next live window, 2026-11-27 ~03:20 GMT). Game not running, mod uninstalled. Updated 2026-11-27 by Claude (lead).
 
 ## Decisions
 - Perception through a read-only Lua mod (user approved 2026-11-26), limited to on-screen information.
@@ -34,8 +34,10 @@ Phase 3 started: learning pipeline (BC + PPO) runs live; no measurable improveme
 | eval-ppo-cycle1 | 1.0 | 7 | 0.71 | 14.3 | 5.6 | [5, 4] |
 | ppo-cycle2 | 3.0 | 6 | 0.50 | 21.3 | 3.7 | [3, 3, 3] |
 | eval-ppo-cycle2 | 1.0 | 7 | 0.57 | 21.0 | 8.3 | [2, 5, 3] |
+| heuristic-live015 (no Mirror upgrades yet) | 1.0 | 3 | 0.67 | 25.0 | 7.7 | [4] |
+| heuristic-live015c (Mirror + Old Spiked Collar) | 1.0 | 19 | 0.84 | 19.6 | 7.5 | [6, 7, 7] |
 
-Reading: samples are 6-10 rooms per group, so these differences are within noise. PPO cycle 1 looked better than baseline at evaluation, cycle 2 did not; treat both as "no reliable change". BC accuracy was low (see docs/plan.md 3a).
+Reading: samples are 6-19 rooms per group, so these differences are within noise. heuristic-live015c ran with permanent upgrades bought during the session (Death Defiance 1, Chthonic Vitality 3, Shadow Presence 5, Old Spiked Collar), so its better depth reflects the upgrades as much as the policy; compare policies only under the same Mirror state. PPO cycle 1 looked better than baseline at evaluation, cycle 2 did not; treat both as "no reliable change". BC accuracy was low (see docs/plan.md 3a).
 
 ## Task board
 | # | Task | Owner | Status |
@@ -50,10 +52,14 @@ Reading: samples are 6-10 rooms per group, so these differences are within noise
 | 008 | Learning pipeline (BC + PPO + eval) | Codex | DONE (lead-reviewed; 2 PPO cycles run live) |
 | 009 | Observation history (`HistoryEncoder`, 183 floats) + more BC data + best-epoch BC | Claude | DONE offline (results in docs/plan.md 3a); live eval pending |
 | 010 | Larger evaluations (>=30 combat rooms per policy) before claiming improvement | open | NEXT |
-| 011 | Mirror of Night: bridge `obs.house.mirror`/`obs.mirror` + `agent/macro/mirror.py` (`spend_darkness`), called once per bedroom visit in run_agent | Codex (impl), Claude (review, integration) | DONE offline; live check pending |
-| 013 | Gifts (Nectar to Cerberus first) and keepsake equip in the House: bridge `house.characters`/`nectar`/`keepsakeRack`/`awardMenu`, `agent/macro/house.py`; wired into run_agent (Hall: gift once per visit after a rack survey; courtyard: equip) | Codex (impl), Claude (review, integration) | DONE offline; live check pending |
-| 014 | Enemy attack events in the bridge + attack block in the encoder | Claude | DONE offline, reviewed (016) and fixed; live pending |
-| 015 | Live session plan: install mod; heuristic runs with Mirror spending to record new data (attack features) and check Mirror/gift flows; retrain BC (history + attacks); eval BC vs heuristic at 1.0 (>=30 combat rooms each); PPO from BC | Claude | NEXT (needs user's window) |
+| 011 | Mirror of Night: bridge `obs.house.mirror`/`obs.mirror` + `agent/macro/mirror.py` (`spend_darkness`), called once per bedroom visit in run_agent | Codex (impl), Claude (review, integration) | DONE, live-verified 2026-11-26 (after live fixes) |
+| 013 | Gifts (Nectar to Cerberus first) and keepsake equip in the House: bridge `house.characters`/`nectar`/`keepsakeRack`/`awardMenu`, `agent/macro/house.py`; wired into run_agent (Hall: gift once per visit after a rack survey; courtyard: equip) | Codex (impl), Claude (review, integration) | DONE, live-verified 2026-11-26 (after live fixes) |
+| 014 | Enemy attack events in the bridge + attack block in the encoder | Claude | DONE, live: firedAgo present on enemy rows |
+| 015 | Live session: House flows verified, heuristic data recorded (22 combat rooms), BC v6 trained (`runs/20261127T031200Z-bc-attacks-v6`, held-out 84.7/92.4/94.1%) | Claude | DONE |
+| 018 | Eval BC v6 vs heuristic at 1.0, >=30 combat rooms each, same Mirror state (interleave or note purchases); then PPO from BC v6 | Claude | NEXT (needs user's window) |
+| 019 | PPO cycle with `--whiff-penalty` (e.g. 0.02) vs without; compare clear rate and damage taken (user question on weapon spamming, 2026-11-27) | Claude | LATER |
+| 021 | Cross-provider review of the session-015 changes (commits after 7dc4453: live fixes, door detours, whiff penalty) | Codex or Grok | OPEN |
+| 020 | Mod: export the Mirror's use prompt (like NPCs) so `spend_darkness` stops on the prompt instead of `_REACH`; needs a game restart | open | LATER |
 | 012 | Stage B skills (NPC talk/gifting, Fated List, weapons, Contractor, fishing, Codex, ...) | open | LATER |
 | -- | Projectile perception (no API; consider OnWeaponFired tracking or vision) | open | LATER |
 
